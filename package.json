@@ -1,0 +1,88 @@
+{
+  "name": "tambook",
+  "version": "0.1.0",
+  "description": "Storybook addon for generative UI with Tambo - generate components from natural language",
+  "keywords": [
+    "storybook",
+    "storybook-addons",
+    "tambo",
+    "generative-ui",
+    "ai",
+    "components"
+  ],
+  "license": "MIT",
+  "author": "",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./manager": {
+      "import": "./dist/manager.js",
+      "require": "./dist/manager.cjs"
+    },
+    "./preview": {
+      "import": "./dist/preview.js",
+      "require": "./dist/preview.cjs"
+    },
+    "./preset": {
+      "import": "./dist/preset.js",
+      "require": "./dist/preset.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@tambo-ai/react": "^0.73.0"
+  },
+  "devDependencies": {
+    "@storybook/icons": "^1.2.12",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "jsdom": "^24.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "storybook": "^8.4.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0",
+    "storybook": "^8.0.0",
+    "zod": "^3.22.0"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
+  "storybook": {
+    "displayName": "Tambook",
+    "supportedFrameworks": [
+      "react"
+    ],
+    "icon": "https://tambo.co/favicon.ico"
+  }
+}
