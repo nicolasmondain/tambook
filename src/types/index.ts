@@ -1,5 +1,11 @@
 import type { ComponentType } from 'react';
 import type { ZodSchema } from 'zod';
+import type { JSONSchema7 } from 'json-schema';
+
+/**
+ * Schema type that can be either Zod or JSON Schema
+ */
+export type PropsSchema<P = unknown> = ZodSchema<P> | JSONSchema7;
 
 /**
  * Configuration for a component registered with Tambook
@@ -14,8 +20,8 @@ export interface TambookComponentConfig<P = unknown> {
   /** The React component */
   component: ComponentType<P>;
 
-  /** Zod schema defining the component's props */
-  propsSchema: ZodSchema<P>;
+  /** Schema defining the component's props (Zod or JSON Schema) */
+  propsSchema: PropsSchema<P>;
 }
 
 /**
@@ -30,6 +36,12 @@ export interface TambookParameters {
 
   /** Optional API key (for cloud-hosted Tambo) */
   apiKey?: string;
+
+  /**
+   * Whether to auto-extract component metadata from Storybook argTypes
+   * @default true
+   */
+  autoExtract?: boolean;
 }
 
 /**

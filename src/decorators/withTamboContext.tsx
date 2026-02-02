@@ -10,6 +10,11 @@ import type {
   ThreadState,
   ChatMessage,
 } from '../types';
+import {
+  extractComponentFromContext,
+  globalComponentRegistry,
+  type StoryContext as ExtractorContext,
+} from '../services/componentExtractor';
 
 /**
  * Inner component that handles Tambo integration and channel communication
@@ -147,17 +152,54 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
   const parameters = (context.parameters?.[PARAM_KEY] || {}) as TambookParameters;
   const tamboUrl = parameters.apiUrl || DEFAULT_CONFIG.apiUrl;
 
-  // Build component tools for Tambo from registered components
-  const componentTools: TamboComponent[] = (parameters.components || []).map((config) => ({
+  // Check if auto-extraction is enabled (default: true)
+  const autoExtract = parameters.autoExtract !== false;
+
+  // Auto-extract component from current story context
+  if (autoExtract) {
+    const extractedComponent = extractComponentFromContext(context as unknown as ExtractorContext);
+    if (extractedComponent) {
+      // Register to global registry (tracks unique components)
+      globalComponentRegistry.register(extractedComponent);
+    }
+  }
+
+  // Build component tools for Tambo from manually registered components
+  const manualComponents: TamboComponent[] = (parameters.components || []).map((config) => ({
     name: config.name,
     description: config.description,
     component: config.component,
     propsSchema: config.propsSchema,
   }));
 
+  // Create a set of manually configured component names for priority checking
+  const manualComponentNames = new Set(manualComponents.map((c) => c.name));
+
+  // Get auto-extracted components (excluding any manually configured ones)
+  const autoExtractedComponents: TamboComponent[] = autoExtract
+    ? globalComponentRegistry
+        .getAll()
+        .filter((c) => !manualComponentNames.has(c.name))
+        .map((c) => ({
+          name: c.name,
+          description: c.description,
+          component: c.component,
+          propsSchema: c.propsSchema,
+        }))
+    : [];
+
+  // Combine: manual components take precedence, then auto-extracted
+  const componentTools: TamboComponent[] = [...manualComponents, ...autoExtractedComponents];
+
   // API key is required by TamboProvider
   // For self-hosted mode, we use a placeholder key
   const apiKey = parameters.apiKey || 'tambook-local';
+
+  // Create augmented parameters for the bridge
+  const augmentedParameters: TambookParameters = {
+    ...parameters,
+    components: componentTools as TambookComponentConfig[],
+  };
 
   return (
     <TamboProvider
@@ -165,7 +207,7 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
       apiKey={apiKey}
       components={componentTools}
     >
-      <TamboContextBridge parameters={parameters}>
+      <TamboContextBridge parameters={augmentedParameters}>
         <StoryFn />
       </TamboContextBridge>
     </TamboProvider>

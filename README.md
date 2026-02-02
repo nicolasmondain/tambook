@@ -4,10 +4,11 @@ Talk to your design system.
 
 ## Features
 
+- **Zero Configuration**: Automatically discovers components from your Storybook stories
 - **Natural Language Component Generation**: Describe components in plain English and let AI generate them
 - **Real-time Preview**: See generated components rendered instantly in your Storybook
 - **Self-hosted Mode**: No API key required - uses local Tambo backend
-- **Component Registration**: Register your components with Zod schemas for type-safe generation
+- **Auto-extracted Schemas**: Converts Storybook argTypes to schemas automatically
 - **Copy Props**: Easily copy generated component props to use in your code
 - **Story Export**: Download generated stories as TypeScript files
 
@@ -41,60 +42,7 @@ const config: StorybookConfig = {
 export default config;
 ```
 
-### 2. Configure your components
-
-In your `.storybook/preview.ts`, register the components you want to use for generation:
-
-```typescript
-import type { Preview } from '@storybook/react';
-import { z } from 'zod';
-import { Button, Card, Input } from '../src/components';
-
-const preview: Preview = {
-  parameters: {
-    tambook: {
-      // Optional: Custom API URL for self-hosted Tambo
-      // apiUrl: 'http://localhost:3030',
-
-      // Register components with their schemas
-      components: [
-        {
-          name: 'Button',
-          description: 'A clickable button with style variants',
-          component: Button,
-          propsSchema: z.object({
-            label: z.string().describe('The button text'),
-            variant: z.enum(['primary', 'secondary', 'outline']).describe('Visual style'),
-            disabled: z.boolean().optional().describe('Whether the button is disabled'),
-          }),
-        },
-        {
-          name: 'Card',
-          description: 'A container card for content',
-          component: Card,
-          propsSchema: z.object({
-            title: z.string().describe('Card title'),
-            children: z.string().describe('Card content'),
-          }),
-        },
-        {
-          name: 'Input',
-          description: 'A text input field',
-          component: Input,
-          propsSchema: z.object({
-            placeholder: z.string().optional(),
-            type: z.enum(['text', 'email', 'password']).default('text'),
-          }),
-        },
-      ],
-    },
-  },
-};
-
-export default preview;
-```
-
-### 3. Start Tambo backend (Self-hosted mode)
+### 2. Start Tambo backend (Self-hosted mode)
 
 For local development without an API key, run the Tambo cloud locally:
 
@@ -103,6 +51,53 @@ npx tambo-cloud
 ```
 
 This starts a local Tambo server at `http://localhost:3030`.
+
+**That's it!** Tambook automatically discovers your components from Storybook's metadata - no manual configuration needed.
+
+## How It Works
+
+Tambook extracts component information from your existing Storybook setup:
+
+- **Component name**: From the story title (e.g., `Components/Button` → `Button`)
+- **Description**: From `parameters.docs.description.component`
+- **Props schema**: Automatically converted from `argTypes`
+
+```typescript
+// Your existing story - no tambook config needed!
+const meta: Meta<typeof Button> = {
+  title: 'Components/Button',
+  component: Button,
+  parameters: {
+    docs: {
+      description: {
+        component: 'A clickable button with style variants',
+      },
+    },
+  },
+  argTypes: {
+    label: { control: 'text', description: 'The button text' },
+    variant: {
+      control: 'select',
+      options: ['primary', 'secondary', 'outline'],
+    },
+    disabled: { control: 'boolean' },
+  },
+};
+```
+
+### ArgTypes to Schema Conversion
+
+| Storybook Control | JSON Schema |
+|------------------|-------------|
+| `text`, `color` | `{ type: "string" }` |
+| `number`, `range` | `{ type: "number", min?, max? }` |
+| `boolean` | `{ type: "boolean" }` |
+| `select`, `radio` | `{ type: "string", enum: [...] }` |
+| `multi-select`, `check` | `{ type: "array", items: { enum } }` |
+| `object` | `{ type: "object" }` |
+| `date` | `{ type: "string", format: "date-time" }` |
+
+Non-serializable props (functions, ReactNode, refs) are automatically excluded.
 
 ## Usage
 
@@ -118,28 +113,87 @@ This starts a local Tambo server at `http://localhost:3030`.
 - "Make a card with the title 'Welcome' and some placeholder content"
 - "Generate an email input with a placeholder 'Enter your email'"
 
+## Advanced Configuration
+
+### Manual Component Registration (Optional)
+
+If you need more control, you can manually configure components. Manual configuration takes precedence over auto-discovery:
+
+```typescript
+import type { Preview } from '@storybook/react';
+import { z } from 'zod';
+import { Button } from '../src/components';
+
+const preview: Preview = {
+  parameters: {
+    tambook: {
+      components: [
+        {
+          name: 'Button',
+          description: 'A clickable button with style variants',
+          component: Button,
+          // Use Zod schema for more precise control
+          propsSchema: z.object({
+            label: z.string().describe('The button text'),
+            variant: z.enum(['primary', 'secondary', 'outline']),
+            disabled: z.boolean().optional(),
+          }),
+        },
+      ],
+    },
+  },
+};
+
+export default preview;
+```
+
+### Disable Auto-Discovery
+
+To disable auto-extraction globally:
+
+```typescript
+parameters: {
+  tambook: {
+    autoExtract: false,
+  },
+}
+```
+
+Or for a specific story:
+
+```typescript
+export const MyStory = {
+  parameters: {
+    tambook: {
+      autoExtract: false,
+    },
+  },
+};
+```
+
 ## API Reference
 
 ### TambookParameters
 
 Configuration options for the addon:
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `components` | `TambookComponentConfig[]` | Array of registered components |
-| `apiUrl` | `string` | Optional custom Tambo API URL |
-| `apiKey` | `string` | Optional API key for cloud-hosted Tambo |
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `components` | `TambookComponentConfig[]` | `[]` | Manually registered components (takes precedence) |
+| `apiUrl` | `string` | `http://localhost:3030` | Custom Tambo API URL |
+| `apiKey` | `string` | - | API key for cloud-hosted Tambo |
+| `autoExtract` | `boolean` | `true` | Auto-discover components from stories |
 
 ### TambookComponentConfig
 
-Configuration for each registered component:
+Configuration for manually registered components:
 
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | `string` | Display name of the component |
 | `description` | `string` | Description for the AI to understand the component's purpose |
 | `component` | `ComponentType` | The React component |
-| `propsSchema` | `ZodSchema` | Zod schema defining the component's props |
+| `propsSchema` | `ZodSchema \| JSONSchema7` | Schema defining the component's props |
 
 ## Architecture
 
@@ -161,7 +215,7 @@ Manager (Chat Panel)  <--channel-->  Preview (TamboProvider)
 
 - Storybook 8.x
 - React 18.x
-- Zod 3.x (optional, for component schemas)
+- Zod 3.x (optional, only for manual schema configuration)
 
 ## Development
 
@@ -181,6 +235,20 @@ npm run typecheck
 # Run tests
 npm test
 ```
+
+### Example Project
+
+The repo includes an example Storybook project for testing and development:
+
+```bash
+# First build the addon and install example dependencies
+npm run example:install
+
+# Run the example Storybook
+npm run example:storybook
+```
+
+This opens Storybook at http://localhost:6006 with sample Button, Card, Input, and Badge components. The Tambook panel will auto-discover all components from the stories.
 
 ## License
 
