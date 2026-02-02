@@ -1,6 +1,6 @@
 # tambook
 
-A Storybook addon that integrates with [Tambo](https://tambo.co/) to enable developers to generate UI components from natural language descriptions directly within Storybook.
+Talk to your design system.
 
 ## Features
 
