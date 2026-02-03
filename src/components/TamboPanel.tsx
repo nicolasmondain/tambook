@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useChannel, useAddonState } from 'storybook/internal/manager-api';
 import { AddonPanel } from 'storybook/internal/components';
 import { ADDON_ID, EVENTS } from '../constants';
@@ -114,14 +114,36 @@ export function TamboPanel({ active }: TamboPanelProps) {
   const [registeredComponents, setRegisteredComponents] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Track if we've received a live update from the preview
+  const hasReceivedLiveUpdate = useRef(false);
+  // Track if we've already reset the stale isGenerating state
+  const hasResetStaleState = useRef(false);
+
+  // Reset isGenerating if it's stale (from persisted storage, not from live preview)
+  useEffect(() => {
+    // Only reset once, and only if we haven't received a live update yet
+    if (
+      threadState.isGenerating &&
+      !hasResetStaleState.current &&
+      !hasReceivedLiveUpdate.current
+    ) {
+      hasResetStaleState.current = true;
+      setThreadState({ ...threadState, isGenerating: false });
+    }
+  }, [threadState, setThreadState]);
+
   const emit = useChannel({
     [EVENTS.THREAD_UPDATE]: (payload: ThreadUpdatePayload) => {
+      console.log('[Tambook Panel] THREAD_UPDATE received:', payload.state);
+      // Mark that we've received a live update from the preview
+      hasReceivedLiveUpdate.current = true;
       setThreadState(payload.state);
       if (payload.state.error) {
         setError(payload.state.error);
       }
     },
     [EVENTS.COMPONENTS_REGISTERED]: (payload: ComponentsRegisteredPayload) => {
+      console.log('[Tambook Panel] COMPONENTS_REGISTERED received:', payload.componentNames);
       setRegisteredComponents(payload.componentNames);
     },
     [EVENTS.ERROR]: (payload: ErrorPayload) => {
@@ -156,6 +178,13 @@ export function TamboPanel({ active }: TamboPanelProps) {
   }, [error]);
 
   const hasMessages = threadState.messages.length > 0;
+  const isDisabled = threadState.isGenerating || registeredComponents.length === 0;
+
+  console.log('[Tambook Panel] Render state:', {
+    isGenerating: threadState.isGenerating,
+    registeredCount: registeredComponents.length,
+    isDisabled
+  });
 
   return (
     <AddonPanel active={active}>
@@ -203,11 +232,11 @@ export function TamboPanel({ active }: TamboPanelProps) {
 
           <ChatInput
             onSend={handleSendMessage}
-            disabled={threadState.isGenerating}
+            disabled={threadState.isGenerating || registeredComponents.length === 0}
             placeholder={
               registeredComponents.length > 0
                 ? 'Describe a component to generate...'
-                : 'Register components in preview.ts to get started...'
+                : 'Waiting for components to register...'
             }
           />
         </ContentArea>

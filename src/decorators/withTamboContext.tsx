@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import type { DecoratorFunction, Renderer } from 'storybook/internal/types';
 import { addons } from 'storybook/internal/preview-api';
 import { TamboProvider, useTambo, type TamboComponent } from '@tambo-ai/react';
@@ -31,9 +31,10 @@ function TamboContextBridge({
     thread,
     sendThreadMessage,
     startNewThread,
-    streaming,
   } = useTambo();
   const componentMapRef = useRef<Map<string, TambookComponentConfig>>(new Map());
+  // Track our own generating state since useTambo's streaming can be unreliable
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // Register components with Tambo on mount
   useEffect(() => {
@@ -44,9 +45,11 @@ function TamboContextBridge({
       });
       componentMapRef.current = componentMap;
 
+      const componentNames = parameters.components.map((c) => c.name);
+      console.log('[Tambook Preview] COMPONENTS_REGISTERED:', componentNames);
       // Notify manager of registered components
       channel.emit(EVENTS.COMPONENTS_REGISTERED, {
-        componentNames: parameters.components.map((c) => c.name),
+        componentNames,
       });
     }
   }, [parameters.components, channel]);
@@ -107,26 +110,31 @@ function TamboContextBridge({
   useEffect(() => {
     const state: ThreadState = {
       messages: convertMessages(),
-      isGenerating: streaming ?? false,
+      isGenerating,
       error: undefined,
     };
 
+    console.log('[Tambook Preview] THREAD_UPDATE:', { isGenerating, messageCount: state.messages.length });
     channel.emit(EVENTS.THREAD_UPDATE, { state });
-  }, [thread, streaming, convertMessages, channel]);
+  }, [thread, isGenerating, convertMessages, channel]);
 
   // Handle incoming messages from manager
   useEffect(() => {
     const handleSendMessage = async (payload: SendMessagePayload) => {
       try {
+        setIsGenerating(true);
         await sendThreadMessage(payload.content);
       } catch (error) {
         channel.emit(EVENTS.ERROR, {
           message: error instanceof Error ? error.message : 'Failed to send message',
         });
+      } finally {
+        setIsGenerating(false);
       }
     };
 
     const handleClearThread = () => {
+      setIsGenerating(false);
       startNewThread();
     };
 
