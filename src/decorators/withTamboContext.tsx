@@ -287,7 +287,7 @@ IMPORTANT SCOPE LIMITATION:
 - You are currently in SINGLE-COMPONENT MODE, which means you can ONLY help with the "${currentComponentName}" component.
 - You do NOT have access to any other components in this mode.
 - If the user asks for a different component or wants to combine multiple components, politely explain:
-  "This Tambo panel is scoped to the ${currentComponentName} component only. To work with other components or combine multiple components together, please use the Design System page by clicking the floating button in the bottom-left corner of Storybook."
+  "This Tambo panel is scoped to the ${currentComponentName} component only. To work with other components or combine multiple components together, please navigate to the Design System page from the sidebar menu."
 
 When the user asks to modify props, only include the props they mentioned. Unmentioned props will keep their current values - do not set them to null.${schemaInfo}`;
     },

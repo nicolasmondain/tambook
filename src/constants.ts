@@ -63,9 +63,6 @@ export const EVENTS = {
   /** Manager → Preview: clear design system thread */
   CLEAR_DS_THREAD: `${ADDON_ID}/clear-ds-thread`,
 
-  /** Preview → Manager: open design system page */
-  OPEN_DESIGN_SYSTEM: `${ADDON_ID}/open-design-system`,
-
   /** Manager → Preview: request current component list (for late-mounting components) */
   REQUEST_COMPONENTS: `${ADDON_ID}/request-components`,
 
