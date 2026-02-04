@@ -2,6 +2,8 @@
 
 Talk to your design system.
 
+Built during the [Tambo Hackathon](https://www.wemakedevs.org/hackathons/tambo), tambook connects your Storybook component library with [Tambo](https://tambo.co)'s generative UI. Describe what you want in plain English and see your components come to life—no more hunting through stories or manually tweaking props.
+
 ## Features
 
 - **Zero Configuration**: Automatically discovers components from your Storybook stories
