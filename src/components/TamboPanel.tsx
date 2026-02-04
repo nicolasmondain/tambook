@@ -5,7 +5,6 @@ import { ADDON_ID, EVENTS } from '../constants';
 import type {
   ThreadState,
   ThreadUpdatePayload,
-  ComponentsRegisteredPayload,
   ErrorPayload,
   PropsGeneratedPayload,
 } from '../types';
@@ -98,38 +97,6 @@ const EmptyStateText = styled.p({
   lineHeight: 1.5,
 });
 
-const LoadingBar = styled.div(({ theme }) => ({
-  padding: '8px 12px',
-  backgroundColor: theme.background.hoverable,
-  borderBottom: `1px solid ${theme.appBorderColor}`,
-  fontSize: '12px',
-  color: theme.color.mediumdark,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-}));
-
-const ProgressBarContainer = styled.div(({ theme }) => ({
-  flex: 1,
-  height: '4px',
-  backgroundColor: theme.appBorderColor,
-  borderRadius: '2px',
-  overflow: 'hidden',
-}));
-
-const ProgressBarFill = styled.div<{ progress: number }>(({ theme, progress }) => ({
-  height: '100%',
-  width: `${progress}%`,
-  backgroundColor: theme.color.secondary,
-  borderRadius: '2px',
-  transition: 'width 0.2s ease',
-}));
-
-interface PreparationProgress {
-  loaded: number;
-  total: number;
-}
-
 const defaultThreadState: ThreadState = {
   messages: [],
   isGenerating: false,
@@ -145,13 +112,11 @@ export function TamboPanel({ active }: TamboPanelProps) {
     `${ADDON_ID}/thread`,
     defaultThreadState
   );
-  const [registeredComponents, setRegisteredComponents] = useState<string[]>([]);
+  // Current component for this story (scoped, not all components)
+  const [currentComponent, setCurrentComponent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Track which messages have had their props applied to Controls
   const [appliedPropsMessageIds, setAppliedPropsMessageIds] = useState<Set<string>>(new Set());
-  // Preparation progress state
-  const [preparationProgress, setPreparationProgress] = useState<PreparationProgress | null>(null);
-  const [isComponentsReady, setIsComponentsReady] = useState(false);
 
   // Track if we've received a live update from the preview
   const hasReceivedLiveUpdate = useRef(false);
@@ -180,8 +145,9 @@ export function TamboPanel({ active }: TamboPanelProps) {
         setError(payload.state.error);
       }
     },
-    [EVENTS.COMPONENTS_REGISTERED]: (payload: ComponentsRegisteredPayload) => {
-      setRegisteredComponents(payload.componentNames);
+    // Listen for the current component (scoped to this story)
+    [EVENTS.CURRENT_COMPONENT]: (payload: { componentName: string }) => {
+      setCurrentComponent(payload.componentName);
     },
     [EVENTS.PROPS_GENERATED]: (payload: PropsGeneratedPayload) => {
       // Update the current story's args with the generated props
@@ -204,14 +170,6 @@ export function TamboPanel({ active }: TamboPanelProps) {
     },
     [EVENTS.ERROR]: (payload: ErrorPayload) => {
       setError(payload.message);
-    },
-    [EVENTS.PREPARATION_PROGRESS]: (payload: PreparationProgress) => {
-      setPreparationProgress(payload);
-    },
-    [EVENTS.ALL_COMPONENTS_READY]: (payload: { components: string[] }) => {
-      setIsComponentsReady(true);
-      setPreparationProgress(null);
-      setRegisteredComponents(payload.components);
     },
   });
 
@@ -242,6 +200,7 @@ export function TamboPanel({ active }: TamboPanelProps) {
   }, [error]);
 
   const hasMessages = threadState.messages.length > 0;
+  const isReady = currentComponent && currentComponent !== 'Unknown';
 
   return (
     <AddonPanel active={active}>
@@ -249,11 +208,8 @@ export function TamboPanel({ active }: TamboPanelProps) {
         <Header>
           <div>
             <Title>Tambook</Title>
-            {registeredComponents.length > 0 && (
-              <ComponentCount>
-                {registeredComponents.length} component
-                {registeredComponents.length !== 1 ? 's' : ''} registered
-              </ComponentCount>
+            {currentComponent && currentComponent !== 'Unknown' && (
+              <ComponentCount>{currentComponent}</ComponentCount>
             )}
           </div>
           {hasMessages && (
@@ -262,23 +218,6 @@ export function TamboPanel({ active }: TamboPanelProps) {
         </Header>
 
         {error && <ErrorBanner>{error}</ErrorBanner>}
-
-        {preparationProgress && (
-          <LoadingBar>
-            <span>
-              Loading components... {preparationProgress.loaded}/{preparationProgress.total}
-            </span>
-            <ProgressBarContainer>
-              <ProgressBarFill
-                progress={
-                  preparationProgress.total > 0
-                    ? (preparationProgress.loaded / preparationProgress.total) * 100
-                    : 0
-                }
-              />
-            </ProgressBarContainer>
-          </LoadingBar>
-        )}
 
         <ContentArea>
           {hasMessages ? (
@@ -290,30 +229,21 @@ export function TamboPanel({ active }: TamboPanelProps) {
             />
           ) : (
             <EmptyState>
-              <EmptyStateTitle>Configure Components with AI</EmptyStateTitle>
+              <EmptyStateTitle>Configure {currentComponent || 'Component'} with AI</EmptyStateTitle>
               <EmptyStateText>
-                Describe the component you want and Tambook will configure the
+                Describe the {currentComponent || 'component'} you want and Tambook will configure the
                 Controls automatically.
-                {registeredComponents.length > 0 && (
-                  <>
-                    <br />
-                    <br />
-                    Available: {registeredComponents.join(', ')}
-                  </>
-                )}
               </EmptyStateText>
             </EmptyState>
           )}
 
           <ChatInput
             onSend={handleSendMessage}
-            disabled={threadState.isGenerating || registeredComponents.length === 0 || !!preparationProgress}
+            disabled={threadState.isGenerating || !isReady}
             placeholder={
-              preparationProgress
-                ? 'Loading design system components...'
-                : registeredComponents.length > 0
-                  ? 'Describe a component to generate...'
-                  : 'Waiting for components to register...'
+              isReady
+                ? `Describe a ${currentComponent} to generate...`
+                : 'Waiting for component...'
             }
           />
         </ContentArea>

@@ -76,9 +76,11 @@ let preparationInitiated = false;
 function TamboContextBridge({
   children,
   parameters,
+  currentComponentName,
 }: {
   children: React.ReactNode;
   parameters: TambookParameters;
+  currentComponentName: string;
 }) {
   const channel = addons.getChannel();
   const {
@@ -92,6 +94,13 @@ function TamboContextBridge({
   // Track which messages have already had their props emitted
   const emittedPropsRef = useRef<Set<string>>(new Set());
 
+  // Emit current component for the story panel (scoped to single component)
+  useEffect(() => {
+    channel.emit(EVENTS.CURRENT_COMPONENT, {
+      componentName: currentComponentName,
+    });
+  }, [currentComponentName, channel]);
+
   // Register components with Tambo on mount
   useEffect(() => {
     if (parameters.components) {
@@ -102,7 +111,7 @@ function TamboContextBridge({
       componentMapRef.current = componentMap;
 
       const componentNames = parameters.components.map((c) => c.name);
-      // Notify manager of registered components
+      // Notify manager of registered components (for design system mode)
       channel.emit(EVENTS.COMPONENTS_REGISTERED, {
         componentNames,
       });
@@ -273,6 +282,12 @@ function buildContextHelpers(
 
       return `You are helping configure the "${currentComponentName}" component.
 ${currentComponentDescription}
+
+IMPORTANT SCOPE LIMITATION:
+- You are currently in SINGLE-COMPONENT MODE, which means you can ONLY help with the "${currentComponentName}" component.
+- You do NOT have access to any other components in this mode.
+- If the user asks for a different component or wants to combine multiple components, politely explain:
+  "This Tambo panel is scoped to the ${currentComponentName} component only. To work with other components or combine multiple components together, please use the Design System page by clicking the floating button in the bottom-left corner of Storybook."
 
 When the user asks to modify props, only include the props they mentioned. Unmentioned props will keep their current values - do not set them to null.${schemaInfo}`;
     },
@@ -496,16 +511,21 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
     );
   }
 
-  // Create augmented parameters for the bridge
-  const augmentedParameters: TambookParameters = {
-    ...parameters,
-    components: componentTools as TambookComponentConfig[],
-  };
-
   // Don't render TamboProvider without an API key (would fail anyway)
   if (!apiKey) {
     return <StoryFn />;
   }
+
+  // Get ONLY the current component for single-component mode (story panel)
+  // This ensures the AI can only generate the component being viewed
+  const currentComponentTool = componentTools.find((c) => c.name === currentComponentName);
+  const singleComponentTools: TamboComponent[] = currentComponentTool ? [currentComponentTool] : [];
+
+  // Create augmented parameters for the bridge (single component only)
+  const augmentedParameters: TambookParameters = {
+    ...parameters,
+    components: singleComponentTools as TambookComponentConfig[],
+  };
 
   // Build context helpers scoped to the current component (for story panel)
   const contextHelpers = buildContextHelpers(
@@ -524,20 +544,23 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
 
   return (
     <>
-      {/* Primary provider for single-component story mode */}
+      {/* Primary provider for single-component story mode (ONLY current component) */}
       <TamboProvider
         tamboUrl={tamboUrl}
         apiKey={apiKey}
-        components={componentTools}
+        components={singleComponentTools}
         contextHelpers={contextHelpers}
       >
-        <TamboContextBridge parameters={augmentedParameters}>
+        <TamboContextBridge
+          parameters={augmentedParameters}
+          currentComponentName={currentComponentName}
+        >
           <ComponentPreloader />
           <StoryFn />
         </TamboContextBridge>
       </TamboProvider>
 
-      {/* Secondary provider for design system mode (all components) */}
+      {/* Secondary provider for design system mode (ALL components) */}
       <TamboProvider
         tamboUrl={tamboUrl}
         apiKey={apiKey}

@@ -68,6 +68,9 @@ export const EVENTS = {
 
   /** Manager → Preview: request current component list (for late-mounting components) */
   REQUEST_COMPONENTS: `${ADDON_ID}/request-components`,
+
+  /** Preview → Manager: current story's component info (for scoped panel) */
+  CURRENT_COMPONENT: `${ADDON_ID}/current-component`,
 } as const;
 
 /**
