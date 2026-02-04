@@ -26,12 +26,31 @@ import {
 declare global {
   interface Window {
     __STORYBOOK_PREVIEW__?: {
+      storyStoreValue?: {
+        cacheAllCSFFiles: () => Promise<void>;
+        loadStory: (options: { storyId: string }) => Promise<PreparedStory>;
+        extract: () => Record<string, StoryData>;
+      };
+      // Alternative access pattern
       storyStore?: {
-        loadStory: (options: { storyId: string }) => Promise<unknown>;
-        raw: () => Map<string, StoryData>;
+        cacheAllCSFFiles: () => Promise<void>;
+        loadStory: (options: { storyId: string }) => Promise<PreparedStory>;
+        extract: () => Record<string, StoryData>;
       };
     };
   }
+}
+
+/**
+ * Prepared story from loadStory
+ */
+interface PreparedStory {
+  id: string;
+  title: string;
+  name: string;
+  component?: React.ComponentType<unknown>;
+  argTypes?: Record<string, unknown>;
+  parameters?: Record<string, unknown>;
 }
 
 /**
@@ -205,10 +224,6 @@ function TamboContextBridge({
 }
 
 /**
- * Build context helpers for Tambo that provide current component information.
- * This scopes the AI conversation to the component being viewed.
- */
-/**
  * Simplify a JSON Schema to only essential prop information
  * Returns a clean object with prop names and their allowed values/types
  */
@@ -240,6 +255,10 @@ function simplifyPropsSchema(schema: Record<string, unknown> | undefined): Recor
   return simplified;
 }
 
+/**
+ * Build context helpers for Tambo that provide current component information.
+ * This scopes the AI conversation to the component being viewed.
+ */
 function buildContextHelpers(
   currentComponentName: string,
   currentComponentDescription: string,
@@ -258,6 +277,155 @@ ${currentComponentDescription}
 When the user asks to modify props, only include the props they mentioned. Unmentioned props will keep their current values - do not set them to null.${schemaInfo}`;
     },
   };
+}
+
+/**
+ * Component info for design system context
+ */
+interface ComponentInfo {
+  name: string;
+  description: string;
+  propsSchema?: Record<string, unknown>;
+}
+
+/**
+ * Build context helpers for Design System mode.
+ * Provides full access to all components with composition support.
+ */
+function buildDesignSystemContextHelpers(
+  allComponents: ComponentInfo[]
+): Record<string, () => string> {
+  return {
+    getDesignSystemContext: () => {
+      const componentSummaries = allComponents.map((comp) => {
+        const simplifiedSchema = simplifyPropsSchema(comp.propsSchema);
+        const propsInfo = simplifiedSchema
+          ? `\n    Props: ${JSON.stringify(simplifiedSchema)}`
+          : '';
+        return `  - ${comp.name}: ${comp.description}${propsInfo}`;
+      }).join('\n');
+
+      return `You are a design system assistant with access to ALL of the following components:
+
+${componentSummaries}
+
+IMPORTANT GUIDELINES:
+1. You can use ANY of these components to fulfill the user's request
+2. Components can be NESTED inside each other (e.g., Button inside Card) up to 5 levels deep
+3. Use the "children" prop to compose components together
+4. When nesting components, render child components as React elements
+5. Only include props that are explicitly needed - omit props to use defaults
+6. Be creative in combining components to create rich, functional UIs
+
+Example compositions:
+- A Card with a Button: Use Card with children containing a Button
+- A form: Combine multiple Input components with a submit Button
+- A notification: Badge inside a Card with descriptive text
+
+Think about which components to combine and how to nest them to best fulfill the user's request.`;
+    },
+  };
+}
+
+/**
+ * Bridge component for Design System mode
+ * Handles separate thread and context for full design system access
+ */
+function DesignSystemBridge({
+  allComponents,
+}: {
+  allComponents: TamboComponent[];
+}) {
+  const channel = addons.getChannel();
+  const { thread, sendThreadMessage, startNewThread } = useTambo();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const emittedPropsRef = useRef<Set<string>>(new Set());
+
+  // Convert messages for the design system thread
+  const convertMessages = useCallback((): ChatMessage[] => {
+    if (!thread?.messages) return [];
+
+    return thread.messages.map((msg) => {
+      let textContent = '';
+      if (typeof msg.content === 'string') {
+        textContent = msg.content;
+      } else if (Array.isArray(msg.content)) {
+        textContent = msg.content
+          .filter((part): part is { type: 'text'; text: string } =>
+            typeof part === 'object' && part !== null && 'type' in part && part.type === 'text'
+          )
+          .map((part) => part.text)
+          .join('');
+      }
+
+      const chatMessage: ChatMessage = {
+        id: msg.id,
+        role: msg.role as 'user' | 'assistant',
+        content: textContent,
+        timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
+      };
+
+      const tamboComponent = (msg as Record<string, unknown>).component as {
+        componentName?: string;
+        props?: Record<string, unknown>;
+      } | undefined;
+
+      if (tamboComponent?.componentName) {
+        const tamboProps = tamboComponent.props || {};
+        if (Object.keys(tamboProps).length > 0) {
+          chatMessage.generatedComponent = {
+            componentName: tamboComponent.componentName,
+            props: { ...tamboProps },
+          };
+        }
+      }
+
+      return chatMessage;
+    });
+  }, [thread]);
+
+  // Sync design system thread state to manager
+  useEffect(() => {
+    const messages = convertMessages();
+    const state: ThreadState = {
+      messages,
+      isGenerating,
+      error: undefined,
+    };
+    channel.emit(EVENTS.DS_THREAD_UPDATE, { state });
+  }, [thread, isGenerating, convertMessages, channel]);
+
+  // Handle design system messages
+  useEffect(() => {
+    const handleSendMessage = async (payload: SendMessagePayload) => {
+      try {
+        setIsGenerating(true);
+        await sendThreadMessage(payload.content);
+      } catch (error) {
+        channel.emit(EVENTS.ERROR, {
+          message: error instanceof Error ? error.message : 'Failed to send message',
+        });
+      } finally {
+        setIsGenerating(false);
+      }
+    };
+
+    const handleClearThread = () => {
+      setIsGenerating(false);
+      startNewThread();
+      emittedPropsRef.current.clear();
+    };
+
+    channel.on(EVENTS.SEND_DS_MESSAGE, handleSendMessage);
+    channel.on(EVENTS.CLEAR_DS_THREAD, handleClearThread);
+
+    return () => {
+      channel.off(EVENTS.SEND_DS_MESSAGE, handleSendMessage);
+      channel.off(EVENTS.CLEAR_DS_THREAD, handleClearThread);
+    };
+  }, [channel, sendThreadMessage, startNewThread]);
+
+  return null;
 }
 
 /**
@@ -285,7 +453,7 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
     globalComponentRegistry.register(extractedComponent);
   }
 
-  // Get current component info for context scoping
+  // Get current component info for context scoping (single-component mode)
   const currentComponentName = extractedComponent?.name || 'Unknown';
   const currentComponentDescription = extractedComponent?.description || 'A component';
   const currentPropsSchema = extractedComponent?.propsSchema;
@@ -339,25 +507,46 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
     return <StoryFn />;
   }
 
-  // Build context helpers to scope the AI conversation to the current component
+  // Build context helpers scoped to the current component (for story panel)
   const contextHelpers = buildContextHelpers(
     currentComponentName,
     currentComponentDescription,
     currentPropsSchema as Record<string, unknown> | undefined
   );
 
+  // Build context helpers for design system mode (all components)
+  const allComponentsInfo: ComponentInfo[] = componentTools.map((c) => ({
+    name: c.name,
+    description: c.description,
+    propsSchema: c.propsSchema as Record<string, unknown> | undefined,
+  }));
+  const designSystemContextHelpers = buildDesignSystemContextHelpers(allComponentsInfo);
+
   return (
-    <TamboProvider
-      tamboUrl={tamboUrl}
-      apiKey={apiKey}
-      components={componentTools}
-      contextHelpers={contextHelpers}
-    >
-      <TamboContextBridge parameters={augmentedParameters}>
-        <ComponentPreloader />
-        <StoryFn />
-      </TamboContextBridge>
-    </TamboProvider>
+    <>
+      {/* Primary provider for single-component story mode */}
+      <TamboProvider
+        tamboUrl={tamboUrl}
+        apiKey={apiKey}
+        components={componentTools}
+        contextHelpers={contextHelpers}
+      >
+        <TamboContextBridge parameters={augmentedParameters}>
+          <ComponentPreloader />
+          <StoryFn />
+        </TamboContextBridge>
+      </TamboProvider>
+
+      {/* Secondary provider for design system mode (all components) */}
+      <TamboProvider
+        tamboUrl={tamboUrl}
+        apiKey={apiKey}
+        components={componentTools}
+        contextHelpers={designSystemContextHelpers}
+      >
+        <DesignSystemBridge allComponents={componentTools} />
+      </TamboProvider>
+    </>
   );
 };
 
@@ -404,7 +593,8 @@ function ComponentPreloader() {
 
         // Get the Storybook preview API
         const preview = window.__STORYBOOK_PREVIEW__;
-        if (!preview?.storyStore) {
+        const storyStore = preview?.storyStoreValue || preview?.storyStore;
+        if (!storyStore) {
           console.warn('[Tambook] Storybook preview API not available');
           channel.emit(EVENTS.ALL_COMPONENTS_READY, {
             components: globalComponentRegistry.getNames(),
@@ -417,11 +607,8 @@ function ComponentPreloader() {
           const storyId = storyIds[i];
           try {
             // Use Storybook's internal API to prepare story
-            await preview.storyStore.loadStory({ storyId });
-
-            // The story is now in the store with argTypes
-            const storyMap = preview.storyStore.raw();
-            const story = storyMap.get(storyId);
+            // loadStory returns the prepared story directly
+            const story = await storyStore.loadStory({ storyId }) as PreparedStory;
 
             if (story?.argTypes && story?.component) {
               // Build a context-like object for extraction
@@ -471,9 +658,21 @@ function ComponentPreloader() {
       }
     };
 
+    // Handle requests for current component list (for late-mounting components like DesignSystemPage)
+    const handleRequestComponents = () => {
+      const componentNames = globalComponentRegistry.getNames();
+      if (componentNames.length > 0) {
+        channel.emit(EVENTS.ALL_COMPONENTS_READY, {
+          components: componentNames,
+        });
+      }
+    };
+
     channel.on(EVENTS.REQUEST_PREPARE_ALL, handlePrepareAll);
+    channel.on(EVENTS.REQUEST_COMPONENTS, handleRequestComponents);
     return () => {
       channel.off(EVENTS.REQUEST_PREPARE_ALL, handlePrepareAll);
+      channel.off(EVENTS.REQUEST_COMPONENTS, handleRequestComponents);
     };
   }, [channel]);
 

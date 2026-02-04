@@ -12,3 +12,6 @@ const preview: ProjectAnnotations<Renderer> = {
 };
 
 export default preview;
+
+// Export components for use in MDX/stories
+export { OpenDesignSystemButton } from './components/OpenDesignSystemButton';

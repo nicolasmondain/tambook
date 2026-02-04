@@ -1,0 +1,41 @@
+{/* This creates a sidebar entry for the Design System Chat */}
+
+import { Meta } from '@storybook/blocks';
+import { OpenDesignSystemButton } from 'tambook/preview';
+
+<Meta title="Design System" />
+
+# Design System Chat
+
+Welcome to the **Design System Chat** interface. This page allows you to interact with your entire design system using AI.
+
+## Available Components
+
+All components in your design system are available here:
+- **Button** - Interactive button with variants
+- **Card** - Content container with optional image and footer
+- **Input** - Form input field with validation
+- **Badge** - Status indicator with colors
+
+## How to Use
+
+Click the **"Open Design System Chat"** button below to start chatting with your design system. You can:
+
+1. **Generate any component** - "Create a primary button with label 'Submit'"
+2. **Compose components** - "Make a Card with a title, description, and two buttons"
+3. **Mix and match** - "Create a form with email input, password input, and a submit button"
+
+<div style={{ marginTop: '24px' }}>
+  <OpenDesignSystemButton>
+    Open Design System Chat
+  </OpenDesignSystemButton>
+</div>
+
+---
+
+## Tips
+
+- Be specific about which components you want
+- Describe the layout or composition you need
+- Mention specific props like colors, sizes, or variants
+- Components can be nested up to 5 levels deep

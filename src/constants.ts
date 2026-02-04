@@ -48,6 +48,26 @@ export const EVENTS = {
 
   /** Preview → Manager: preparation progress */
   PREPARATION_PROGRESS: `${ADDON_ID}/preparation-progress`,
+
+  // Design System mode events
+
+  /** Manager → Preview: switch to design system mode (all components) */
+  SET_DESIGN_SYSTEM_MODE: `${ADDON_ID}/set-design-system-mode`,
+
+  /** Manager → Preview: send message in design system mode */
+  SEND_DS_MESSAGE: `${ADDON_ID}/send-ds-message`,
+
+  /** Preview → Manager: design system thread update */
+  DS_THREAD_UPDATE: `${ADDON_ID}/ds-thread-update`,
+
+  /** Manager → Preview: clear design system thread */
+  CLEAR_DS_THREAD: `${ADDON_ID}/clear-ds-thread`,
+
+  /** Preview → Manager: open design system page */
+  OPEN_DESIGN_SYSTEM: `${ADDON_ID}/open-design-system`,
+
+  /** Manager → Preview: request current component list (for late-mounting components) */
+  REQUEST_COMPONENTS: `${ADDON_ID}/request-components`,
 } as const;
 
 /**
