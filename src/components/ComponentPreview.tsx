@@ -97,13 +97,9 @@ export function ComponentPreview({
         </CopyButton>
       </Header>
 
-      {component.element ? (
-        <PreviewArea>{component.element}</PreviewArea>
-      ) : (
-        <NoPreviewMessage>
-          Component preview available in story iframe
-        </NoPreviewMessage>
-      )}
+      <NoPreviewMessage>
+        Component rendered in the Canvas tab
+      </NoPreviewMessage>
 
       <PropsDisplay>{JSON.stringify(component.props, null, 2)}</PropsDisplay>
     </Container>

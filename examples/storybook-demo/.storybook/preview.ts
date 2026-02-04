@@ -8,7 +8,12 @@ const preview: Preview = {
         date: /Date$/i,
       },
     },
-    // Tambook will auto-discover components - no configuration needed!
+    tambook: {
+      // Get your API key at https://tambo.co
+      apiKey: import.meta.env.STORYBOOK_TAMBO_API_KEY,
+      // Optional: Use custom URL for self-hosted backend
+      // apiUrl: 'http://localhost:3211',
+    },
   },
 };
 

@@ -40,6 +40,5 @@ export const EVENTS = {
  * Default configuration for the addon
  */
 export const DEFAULT_CONFIG = {
-  /** Default API endpoint for self-hosted Tambo */
-  apiUrl: 'http://localhost:3030',
+  // No default apiUrl - let SDK use Tambo Cloud (https://api.tambo.co)
 } as const;

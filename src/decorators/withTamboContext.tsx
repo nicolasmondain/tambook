@@ -2,7 +2,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import type { DecoratorFunction, Renderer } from 'storybook/internal/types';
 import { addons } from 'storybook/internal/preview-api';
 import { TamboProvider, useTambo, type TamboComponent } from '@tambo-ai/react';
-import { EVENTS, PARAM_KEY, DEFAULT_CONFIG } from '../constants';
+import { EVENTS, PARAM_KEY } from '../constants';
 import type {
   TambookParameters,
   TambookComponentConfig,
@@ -46,7 +46,6 @@ function TamboContextBridge({
       componentMapRef.current = componentMap;
 
       const componentNames = parameters.components.map((c) => c.name);
-      console.log('[Tambook Preview] COMPONENTS_REGISTERED:', componentNames);
       // Notify manager of registered components
       channel.emit(EVENTS.COMPONENTS_REGISTERED, {
         componentNames,
@@ -98,7 +97,9 @@ function TamboContextBridge({
         chatMessage.generatedComponent = {
           componentName,
           props: element.props || {},
-          element,
+          // Note: element is not included as React elements can't be serialized
+          // through the Storybook channel. The component is rendered in the
+          // Preview iframe by Tambo directly.
         };
       }
 
@@ -114,7 +115,6 @@ function TamboContextBridge({
       error: undefined,
     };
 
-    console.log('[Tambook Preview] THREAD_UPDATE:', { isGenerating, messageCount: state.messages.length });
     channel.emit(EVENTS.THREAD_UPDATE, { state });
   }, [thread, isGenerating, convertMessages, channel]);
 
@@ -158,7 +158,8 @@ function TamboContextBridge({
  */
 export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) => {
   const parameters = (context.parameters?.[PARAM_KEY] || {}) as TambookParameters;
-  const tamboUrl = parameters.apiUrl || DEFAULT_CONFIG.apiUrl;
+  // Only pass tamboUrl if explicitly configured, otherwise SDK uses Tambo Cloud
+  const tamboUrl = parameters.apiUrl;
 
   // Check if auto-extraction is enabled (default: true)
   const autoExtract = parameters.autoExtract !== false;
@@ -199,15 +200,27 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
   // Combine: manual components take precedence, then auto-extracted
   const componentTools: TamboComponent[] = [...manualComponents, ...autoExtractedComponents];
 
-  // API key is required by TamboProvider
-  // For self-hosted mode, we use a placeholder key
-  const apiKey = parameters.apiKey || 'tambook-local';
+  // API key handling
+  const apiKey = parameters.apiKey;
+
+  // Warn if no API key is provided for Tambo Cloud
+  if (!apiKey && !tamboUrl) {
+    console.warn(
+      '[Tambook] No API key provided. Get your key at https://tambo.co and add it to your Storybook parameters:\n' +
+      'parameters: { tambook: { apiKey: import.meta.env.STORYBOOK_TAMBO_API_KEY } }'
+    );
+  }
 
   // Create augmented parameters for the bridge
   const augmentedParameters: TambookParameters = {
     ...parameters,
     components: componentTools as TambookComponentConfig[],
   };
+
+  // Don't render TamboProvider without an API key (would fail anyway)
+  if (!apiKey) {
+    return <StoryFn />;
+  }
 
   return (
     <TamboProvider

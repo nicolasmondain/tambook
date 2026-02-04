@@ -9,7 +9,7 @@ Built during the [Tambo Hackathon](https://www.wemakedevs.org/hackathons/tambo),
 - **Zero Configuration**: Automatically discovers components from your Storybook stories
 - **Natural Language Component Generation**: Describe components in plain English and let AI generate them
 - **Real-time Preview**: See generated components rendered instantly in your Storybook
-- **Self-hosted Mode**: No API key required - uses local Tambo backend
+- **Tambo Cloud or Self-hosted**: Use Tambo Cloud with an API key, or run your own backend
 - **Auto-extracted Schemas**: Converts Storybook argTypes to schemas automatically
 - **Copy Props**: Easily copy generated component props to use in your code
 - **Story Export**: Download generated stories as TypeScript files
@@ -44,17 +44,49 @@ const config: StorybookConfig = {
 export default config;
 ```
 
-### 2. Start Tambo backend (Self-hosted mode)
+### 2. Configure Tambo API Key
 
-For local development without an API key, run the Tambo cloud locally:
+Get your API key at [https://tambo.co](https://tambo.co) and add it to your `.storybook/preview.ts`:
 
-```bash
-npx tambo-cloud
+```typescript
+import type { Preview } from '@storybook/react';
+
+const preview: Preview = {
+  parameters: {
+    tambook: {
+      // For Vite-based Storybook:
+      apiKey: import.meta.env.STORYBOOK_TAMBO_API_KEY,
+      // For Webpack-based Storybook:
+      // apiKey: process.env.STORYBOOK_TAMBO_API_KEY,
+    },
+  },
+};
+
+export default preview;
 ```
 
-This starts a local Tambo server at `http://localhost:3030`.
+Create a `.env` file in your Storybook project:
+
+```bash
+STORYBOOK_TAMBO_API_KEY=your_api_key_here
+```
 
 **That's it!** Tambook automatically discovers your components from Storybook's metadata - no manual configuration needed.
+
+### Self-hosted Mode (Optional)
+
+For self-hosted Tambo deployments, provide a custom API URL:
+
+```typescript
+parameters: {
+  tambook: {
+    apiKey: 'your-api-key',
+    apiUrl: 'http://localhost:3211', // Your self-hosted Tambo API
+  },
+}
+```
+
+See [Tambo's self-hosting documentation](https://docs.tambo.co) for backend setup instructions.
 
 ## How It Works
 
@@ -182,8 +214,8 @@ Configuration options for the addon:
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `components` | `TambookComponentConfig[]` | `[]` | Manually registered components (takes precedence) |
-| `apiUrl` | `string` | `http://localhost:3030` | Custom Tambo API URL |
-| `apiKey` | `string` | - | API key for cloud-hosted Tambo |
+| `apiKey` | `string` | - | Tambo API key (required). Get yours at https://tambo.co |
+| `apiUrl` | `string` | Tambo Cloud | Custom API URL for self-hosted Tambo backend |
 | `autoExtract` | `boolean` | `true` | Auto-discover components from stories |
 
 ### TambookComponentConfig

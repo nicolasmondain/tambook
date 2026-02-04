@@ -31,10 +31,19 @@ export interface TambookParameters {
   /** Array of components registered for generation */
   components?: TambookComponentConfig[];
 
-  /** Optional custom API URL for self-hosted Tambo */
+  /**
+   * Custom API URL for self-hosted Tambo backend.
+   * If not provided, uses Tambo Cloud (https://api.tambo.co).
+   * @example 'http://localhost:3211' // Self-hosted
+   */
   apiUrl?: string;
 
-  /** Optional API key (for cloud-hosted Tambo) */
+  /**
+   * Tambo API key. Required for Tambo Cloud.
+   * Get your key at https://tambo.co
+   * @example import.meta.env.STORYBOOK_TAMBO_API_KEY // Vite
+   * @example process.env.STORYBOOK_TAMBO_API_KEY // Webpack
+   */
   apiKey?: string;
 
   /**

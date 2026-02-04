@@ -134,7 +134,6 @@ export function TamboPanel({ active }: TamboPanelProps) {
 
   const emit = useChannel({
     [EVENTS.THREAD_UPDATE]: (payload: ThreadUpdatePayload) => {
-      console.log('[Tambook Panel] THREAD_UPDATE received:', payload.state);
       // Mark that we've received a live update from the preview
       hasReceivedLiveUpdate.current = true;
       setThreadState(payload.state);
@@ -143,7 +142,6 @@ export function TamboPanel({ active }: TamboPanelProps) {
       }
     },
     [EVENTS.COMPONENTS_REGISTERED]: (payload: ComponentsRegisteredPayload) => {
-      console.log('[Tambook Panel] COMPONENTS_REGISTERED received:', payload.componentNames);
       setRegisteredComponents(payload.componentNames);
     },
     [EVENTS.ERROR]: (payload: ErrorPayload) => {
@@ -178,13 +176,6 @@ export function TamboPanel({ active }: TamboPanelProps) {
   }, [error]);
 
   const hasMessages = threadState.messages.length > 0;
-  const isDisabled = threadState.isGenerating || registeredComponents.length === 0;
-
-  console.log('[Tambook Panel] Render state:', {
-    isGenerating: threadState.isGenerating,
-    registeredCount: registeredComponents.length,
-    isDisabled
-  });
 
   return (
     <AddonPanel active={active}>
