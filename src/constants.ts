@@ -34,6 +34,20 @@ export const EVENTS = {
 
   /** Sent from Preview to Manager when components are registered */
   COMPONENTS_REGISTERED: `${ADDON_ID}/components-registered`,
+
+  // Component preparation protocol events
+
+  /** Manager → Preview: request preparation of all stories */
+  REQUEST_PREPARE_ALL: `${ADDON_ID}/request-prepare-all`,
+
+  /** Preview → Manager: story prepared with component data */
+  STORY_PREPARED: `${ADDON_ID}/story-prepared`,
+
+  /** Preview → Manager: all stories prepared */
+  ALL_COMPONENTS_READY: `${ADDON_ID}/all-components-ready`,
+
+  /** Preview → Manager: preparation progress */
+  PREPARATION_PROGRESS: `${ADDON_ID}/preparation-progress`,
 } as const;
 
 /**

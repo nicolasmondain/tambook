@@ -15,6 +15,41 @@ import {
   globalComponentRegistry,
   type StoryContext as ExtractorContext,
 } from '../services/componentExtractor';
+import {
+  fetchStoryIndex,
+  getOneStoryPerComponent,
+} from '../services/storyIndexService';
+
+/**
+ * Storybook Preview global API (internal)
+ */
+declare global {
+  interface Window {
+    __STORYBOOK_PREVIEW__?: {
+      storyStore?: {
+        loadStory: (options: { storyId: string }) => Promise<unknown>;
+        raw: () => Map<string, StoryData>;
+      };
+    };
+  }
+}
+
+/**
+ * Internal Storybook story data structure
+ */
+interface StoryData {
+  id: string;
+  title: string;
+  name: string;
+  component?: React.ComponentType<unknown>;
+  argTypes?: Record<string, unknown>;
+  parameters?: Record<string, unknown>;
+}
+
+/**
+ * Flag to track if preparation has been initiated
+ */
+let preparationInitiated = false;
 
 /**
  * Inner component that handles Tambo integration and channel communication
@@ -170,6 +205,62 @@ function TamboContextBridge({
 }
 
 /**
+ * Build context helpers for Tambo that provide current component information.
+ * This scopes the AI conversation to the component being viewed.
+ */
+/**
+ * Simplify a JSON Schema to only essential prop information
+ * Returns a clean object with prop names and their allowed values/types
+ */
+function simplifyPropsSchema(schema: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  if (!schema) return null;
+
+  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  if (!properties || Object.keys(properties).length === 0) return null;
+
+  const simplified: Record<string, unknown> = {};
+
+  for (const [name, propSchema] of Object.entries(properties)) {
+    const enumValues = propSchema.enum as unknown[] | undefined;
+    const type = propSchema.type as string | undefined;
+
+    if (enumValues && enumValues.length > 0) {
+      simplified[name] = enumValues;
+    } else if (type === 'boolean') {
+      simplified[name] = 'boolean';
+    } else if (type === 'string') {
+      simplified[name] = 'string';
+    } else if (type === 'number') {
+      simplified[name] = 'number';
+    } else {
+      simplified[name] = type || 'any';
+    }
+  }
+
+  return simplified;
+}
+
+function buildContextHelpers(
+  currentComponentName: string,
+  currentComponentDescription: string,
+  propsSchema: Record<string, unknown> | undefined
+): Record<string, () => string> {
+  return {
+    getCurrentComponentContext: () => {
+      const simplifiedSchema = simplifyPropsSchema(propsSchema);
+      const schemaInfo = simplifiedSchema
+        ? `\n\nProps schema:\n${JSON.stringify(simplifiedSchema, null, 2)}`
+        : '';
+
+      return `You are helping configure the "${currentComponentName}" component.
+${currentComponentDescription}
+
+When the user asks to modify props, only include the props they mentioned. Unmentioned props will keep their current values - do not set them to null.${schemaInfo}`;
+    },
+  };
+}
+
+/**
  * Decorator that wraps stories with TamboProvider context
  *
  * This enables AI-powered component generation within the story iframe.
@@ -183,14 +274,21 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
   // Check if auto-extraction is enabled (default: true)
   const autoExtract = parameters.autoExtract !== false;
 
+  // Extract component from current story context
+  const extractedComponent = autoExtract
+    ? extractComponentFromContext(context as unknown as ExtractorContext)
+    : null;
+
   // Auto-extract component from current story context
-  if (autoExtract) {
-    const extractedComponent = extractComponentFromContext(context as unknown as ExtractorContext);
-    if (extractedComponent) {
-      // Register to global registry (tracks unique components)
-      globalComponentRegistry.register(extractedComponent);
-    }
+  if (extractedComponent) {
+    // Register to global registry (tracks unique components)
+    globalComponentRegistry.register(extractedComponent);
   }
+
+  // Get current component info for context scoping
+  const currentComponentName = extractedComponent?.name || 'Unknown';
+  const currentComponentDescription = extractedComponent?.description || 'A component';
+  const currentPropsSchema = extractedComponent?.propsSchema;
 
   // Build component tools for Tambo from manually registered components
   const manualComponents: TamboComponent[] = (parameters.components || []).map((config) => ({
@@ -241,15 +339,143 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
     return <StoryFn />;
   }
 
+  // Build context helpers to scope the AI conversation to the current component
+  const contextHelpers = buildContextHelpers(
+    currentComponentName,
+    currentComponentDescription,
+    currentPropsSchema as Record<string, unknown> | undefined
+  );
+
   return (
     <TamboProvider
       tamboUrl={tamboUrl}
       apiKey={apiKey}
       components={componentTools}
+      contextHelpers={contextHelpers}
     >
       <TamboContextBridge parameters={augmentedParameters}>
+        <ComponentPreloader />
         <StoryFn />
       </TamboContextBridge>
     </TamboProvider>
   );
 };
+
+/**
+ * Component that handles preparation of all stories at startup.
+ * Runs once per Storybook session to pre-load all component metadata.
+ */
+function ComponentPreloader() {
+  const channel = addons.getChannel();
+
+  useEffect(() => {
+    const handlePrepareAll = async () => {
+      // Prevent multiple preparations
+      if (preparationInitiated) {
+        return;
+      }
+      preparationInitiated = true;
+
+      console.log('[Tambook] Starting component preparation...');
+
+      try {
+        // Fetch story index
+        const entries = await fetchStoryIndex();
+        if (entries.length === 0) {
+          console.warn('[Tambook] No stories found in index');
+          channel.emit(EVENTS.ALL_COMPONENTS_READY, {
+            components: globalComponentRegistry.getNames(),
+          });
+          return;
+        }
+
+        // Get one story per component (more efficient than loading all stories)
+        const componentStories = getOneStoryPerComponent(entries);
+        const storyIds = Array.from(componentStories.values());
+        const totalStories = storyIds.length;
+
+        console.log(`[Tambook] Found ${totalStories} unique components to prepare`);
+
+        // Emit progress start
+        channel.emit(EVENTS.PREPARATION_PROGRESS, {
+          loaded: 0,
+          total: totalStories,
+        });
+
+        // Get the Storybook preview API
+        const preview = window.__STORYBOOK_PREVIEW__;
+        if (!preview?.storyStore) {
+          console.warn('[Tambook] Storybook preview API not available');
+          channel.emit(EVENTS.ALL_COMPONENTS_READY, {
+            components: globalComponentRegistry.getNames(),
+          });
+          return;
+        }
+
+        // For each story, trigger preparation
+        for (let i = 0; i < storyIds.length; i++) {
+          const storyId = storyIds[i];
+          try {
+            // Use Storybook's internal API to prepare story
+            await preview.storyStore.loadStory({ storyId });
+
+            // The story is now in the store with argTypes
+            const storyMap = preview.storyStore.raw();
+            const story = storyMap.get(storyId);
+
+            if (story?.argTypes && story?.component) {
+              // Build a context-like object for extraction
+              const extractorContext: ExtractorContext = {
+                title: story.title,
+                name: story.name,
+                component: story.component,
+                argTypes: story.argTypes as Record<string, unknown> as ExtractorContext['argTypes'],
+                parameters: story.parameters as ExtractorContext['parameters'],
+              };
+
+              const extracted = extractComponentFromContext(extractorContext);
+              if (extracted) {
+                const isNew = globalComponentRegistry.register(extracted);
+                if (isNew) {
+                  console.log(`[Tambook] Prepared component: ${extracted.name}`);
+                  channel.emit(EVENTS.STORY_PREPARED, {
+                    componentName: extracted.name,
+                    storyId,
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            console.warn(`[Tambook] Failed to prepare story ${storyId}:`, e);
+          }
+
+          // Emit progress update
+          channel.emit(EVENTS.PREPARATION_PROGRESS, {
+            loaded: i + 1,
+            total: totalStories,
+          });
+        }
+
+        // Notify completion
+        const componentNames = globalComponentRegistry.getNames();
+        console.log(`[Tambook] Component preparation complete: ${componentNames.length} components`);
+        channel.emit(EVENTS.ALL_COMPONENTS_READY, {
+          components: componentNames,
+        });
+      } catch (error) {
+        console.error('[Tambook] Component preparation failed:', error);
+        // Still emit ready event with whatever components we have
+        channel.emit(EVENTS.ALL_COMPONENTS_READY, {
+          components: globalComponentRegistry.getNames(),
+        });
+      }
+    };
+
+    channel.on(EVENTS.REQUEST_PREPARE_ALL, handlePrepareAll);
+    return () => {
+      channel.off(EVENTS.REQUEST_PREPARE_ALL, handlePrepareAll);
+    };
+  }, [channel]);
+
+  return null;
+}

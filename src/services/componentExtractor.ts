@@ -120,19 +120,39 @@ export function extractComponentFromContext(
 }
 
 /**
+ * Progress callback signature
+ */
+type ProgressCallback = (loaded: number, total: number) => void;
+
+/**
  * Registry for tracking auto-discovered components to avoid duplicates
  */
 export class ComponentRegistry {
   private components = new Map<string, ExtractedComponent>();
+  private pendingComponents = new Set<string>();
+  private progressListeners: ProgressCallback[] = [];
+
+  /**
+   * Register a component as "known but not yet extracted"
+   */
+  registerPending(componentName: string): void {
+    if (!this.components.has(componentName)) {
+      this.pendingComponents.add(componentName);
+    }
+  }
 
   /**
    * Register a component, returns true if it was newly added
+   * Also removes from pending if it was there
    */
   register(component: ExtractedComponent): boolean {
+    this.pendingComponents.delete(component.name);
+
     if (this.components.has(component.name)) {
       return false;
     }
     this.components.set(component.name, component);
+    this.notifyProgress();
     return true;
   }
 
@@ -162,6 +182,7 @@ export class ComponentRegistry {
    */
   clear(): void {
     this.components.clear();
+    this.pendingComponents.clear();
   }
 
   /**
@@ -169,6 +190,50 @@ export class ComponentRegistry {
    */
   get size(): number {
     return this.components.size;
+  }
+
+  /**
+   * Check if all pending components are loaded
+   */
+  isFullyLoaded(): boolean {
+    return this.pendingComponents.size === 0;
+  }
+
+  /**
+   * Get loading progress
+   */
+  getProgress(): { loaded: number; total: number } {
+    const total = this.components.size + this.pendingComponents.size;
+    return { loaded: this.components.size, total };
+  }
+
+  /**
+   * Get pending component names
+   */
+  getPendingNames(): string[] {
+    return Array.from(this.pendingComponents);
+  }
+
+  /**
+   * Subscribe to progress updates
+   * @returns Unsubscribe function
+   */
+  onProgress(callback: ProgressCallback): () => void {
+    this.progressListeners.push(callback);
+    return () => {
+      const index = this.progressListeners.indexOf(callback);
+      if (index !== -1) {
+        this.progressListeners.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * Notify all progress listeners
+   */
+  private notifyProgress(): void {
+    const { loaded, total } = this.getProgress();
+    this.progressListeners.forEach((cb) => cb(loaded, total));
   }
 }
 

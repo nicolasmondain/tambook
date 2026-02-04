@@ -1,12 +1,20 @@
 import React from 'react';
 import { addons, types } from 'storybook/internal/manager-api';
-import { ADDON_ID, PANEL_ID } from './constants';
+import { ADDON_ID, PANEL_ID, EVENTS } from './constants';
 import { TamboPanel } from './components/TamboPanel';
 
 /**
  * Register the Tambook addon with Storybook's manager
  */
-addons.register(ADDON_ID, () => {
+addons.register(ADDON_ID, (api) => {
+  const channel = api.getChannel();
+
+  // Request component preparation when manager loads
+  // Small delay to ensure preview is ready
+  setTimeout(() => {
+    channel?.emit(EVENTS.REQUEST_PREPARE_ALL);
+  }, 500);
+
   addons.add(PANEL_ID, {
     type: types.PANEL,
     title: 'Tambook',
