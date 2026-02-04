@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useChannel, useAddonState } from 'storybook/internal/manager-api';
+import { useChannel, useAddonState, useStorybookApi } from 'storybook/internal/manager-api';
 import { AddonPanel } from 'storybook/internal/components';
 import { ADDON_ID, EVENTS } from '../constants';
 import type {
@@ -7,6 +7,7 @@ import type {
   ThreadUpdatePayload,
   ComponentsRegisteredPayload,
   ErrorPayload,
+  PropsGeneratedPayload,
 } from '../types';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -107,12 +108,15 @@ const defaultThreadState: ThreadState = {
  * Main chat panel component displayed in Storybook's addon panel area
  */
 export function TamboPanel({ active }: TamboPanelProps) {
+  const api = useStorybookApi();
   const [threadState, setThreadState] = useAddonState<ThreadState>(
     `${ADDON_ID}/thread`,
     defaultThreadState
   );
   const [registeredComponents, setRegisteredComponents] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Track which messages have had their props applied to Controls
+  const [appliedPropsMessageIds, setAppliedPropsMessageIds] = useState<Set<string>>(new Set());
 
   // Track if we've received a live update from the preview
   const hasReceivedLiveUpdate = useRef(false);
@@ -143,6 +147,19 @@ export function TamboPanel({ active }: TamboPanelProps) {
     },
     [EVENTS.COMPONENTS_REGISTERED]: (payload: ComponentsRegisteredPayload) => {
       setRegisteredComponents(payload.componentNames);
+    },
+    [EVENTS.PROPS_GENERATED]: (payload: PropsGeneratedPayload) => {
+      // Update the current story's args with the generated props
+      try {
+        const currentStory = api.getCurrentStoryData();
+        if (currentStory) {
+          api.updateStoryArgs(currentStory, payload.props);
+          // Track that we applied props for this message
+          setAppliedPropsMessageIds(prev => new Set(prev).add(payload.messageId));
+        }
+      } catch (err) {
+        console.error('[Tambook] Failed to update story args:', err);
+      }
     },
     [EVENTS.ERROR]: (payload: ErrorPayload) => {
       setError(payload.message);
@@ -203,13 +220,14 @@ export function TamboPanel({ active }: TamboPanelProps) {
               messages={threadState.messages}
               isGenerating={threadState.isGenerating}
               onCopyProps={handleCopyProps}
+              appliedPropsMessageIds={appliedPropsMessageIds}
             />
           ) : (
             <EmptyState>
-              <EmptyStateTitle>Generate Components with AI</EmptyStateTitle>
+              <EmptyStateTitle>Configure Components with AI</EmptyStateTitle>
               <EmptyStateText>
-                Describe a component you want to create and Tambook will generate it
-                using your registered components.
+                Describe the component you want and Tambook will configure the
+                Controls automatically.
                 {registeredComponents.length > 0 && (
                   <>
                     <br />

@@ -146,3 +146,15 @@ export interface ComponentsRegisteredPayload {
   /** Names of registered components */
   componentNames: string[];
 }
+
+/**
+ * Event payload for PROPS_GENERATED event
+ */
+export interface PropsGeneratedPayload {
+  /** Name of the component */
+  componentName: string;
+  /** Generated props to apply to Controls */
+  props: Record<string, unknown>;
+  /** Message ID for tracking */
+  messageId: string;
+}

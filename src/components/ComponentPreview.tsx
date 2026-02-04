@@ -6,6 +6,7 @@ import type { GeneratedComponent } from '../types';
 interface ComponentPreviewProps {
   component: GeneratedComponent;
   onCopyProps: (props: Record<string, unknown>) => void;
+  propsApplied?: boolean;
 }
 
 const Container = styled.div(({ theme }) => ({
@@ -50,13 +51,6 @@ const CopyButton = styled.button(({ theme }) => ({
   },
 }));
 
-const PreviewArea = styled.div(({ theme }) => ({
-  padding: '12px',
-  backgroundColor: theme.background.app,
-  border: `1px solid ${theme.appBorderColor}`,
-  borderRadius: '6px',
-}));
-
 const PropsDisplay = styled.pre(({ theme }) => ({
   margin: 0,
   padding: '8px',
@@ -69,11 +63,13 @@ const PropsDisplay = styled.pre(({ theme }) => ({
   maxHeight: '100px',
 }));
 
-const NoPreviewMessage = styled.div(({ theme }) => ({
+const AppliedBadge = styled.div(({ theme }) => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
   fontSize: '11px',
-  color: theme.color.mediumdark,
-  fontStyle: 'italic',
-  padding: '8px 0',
+  color: theme.color.positive,
+  padding: '6px 0',
 }));
 
 /**
@@ -82,6 +78,7 @@ const NoPreviewMessage = styled.div(({ theme }) => ({
 export function ComponentPreview({
   component,
   onCopyProps,
+  propsApplied,
 }: ComponentPreviewProps) {
   const handleCopyClick = () => {
     onCopyProps(component.props);
@@ -97,9 +94,11 @@ export function ComponentPreview({
         </CopyButton>
       </Header>
 
-      <NoPreviewMessage>
-        Component rendered in the Canvas tab
-      </NoPreviewMessage>
+      {propsApplied && (
+        <AppliedBadge>
+          ✓ Props applied to Controls
+        </AppliedBadge>
+      )}
 
       <PropsDisplay>{JSON.stringify(component.props, null, 2)}</PropsDisplay>
     </Container>

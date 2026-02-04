@@ -35,6 +35,8 @@ function TamboContextBridge({
   const componentMapRef = useRef<Map<string, TambookComponentConfig>>(new Map());
   // Track our own generating state since useTambo's streaming can be unreliable
   const [isGenerating, setIsGenerating] = useState(false);
+  // Track which messages have already had their props emitted
+  const emittedPropsRef = useRef<Set<string>>(new Set());
 
   // Register components with Tambo on mount
   useEffect(() => {
@@ -79,28 +81,25 @@ function TamboContextBridge({
         timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
       };
 
-      // Check if the message has a rendered component
-      if (msg.renderedComponent) {
-        // The renderedComponent is a ReactElement
-        const element = msg.renderedComponent;
-        const componentType = element.type;
+      // Check for Tambo's component metadata
+      const tamboComponent = (msg as any).component;
 
-        // Try to find the component name from our registered components
-        let componentName = 'Unknown';
-        for (const [name, config] of componentMapRef.current.entries()) {
-          if (config.component === componentType) {
-            componentName = name;
-            break;
-          }
+      if (tamboComponent?.componentName) {
+        const componentName = tamboComponent.componentName;
+
+        // Get props ONLY from Tambo's component.props (authoritative source)
+        // Do NOT use renderedComponent.props as it contains Tambo's wrapper structure
+        // which includes React elements that can't be serialized
+        const tamboProps = tamboComponent.props || {};
+
+        // Only set generatedComponent if we have actual props (not empty)
+        // This ensures we wait for props to be populated during streaming
+        if (Object.keys(tamboProps).length > 0) {
+          chatMessage.generatedComponent = {
+            componentName,
+            props: { ...tamboProps }, // Shallow copy to ensure plain object
+          };
         }
-
-        chatMessage.generatedComponent = {
-          componentName,
-          props: element.props || {},
-          // Note: element is not included as React elements can't be serialized
-          // through the Storybook channel. The component is rendered in the
-          // Preview iframe by Tambo directly.
-        };
       }
 
       return chatMessage;
@@ -109,13 +108,33 @@ function TamboContextBridge({
 
   // Sync thread state to manager
   useEffect(() => {
+    const messages = convertMessages();
     const state: ThreadState = {
-      messages: convertMessages(),
+      messages,
       isGenerating,
       error: undefined,
     };
 
     channel.emit(EVENTS.THREAD_UPDATE, { state });
+
+    // Check for new generated components and emit PROPS_GENERATED
+    // Only emit when NOT generating (streaming complete) to ensure props are fully populated
+    if (!isGenerating) {
+      for (const msg of messages) {
+        if (
+          msg.generatedComponent &&
+          !emittedPropsRef.current.has(msg.id) &&
+          Object.keys(msg.generatedComponent.props).length > 0
+        ) {
+          emittedPropsRef.current.add(msg.id);
+          channel.emit(EVENTS.PROPS_GENERATED, {
+            componentName: msg.generatedComponent.componentName,
+            props: msg.generatedComponent.props,
+            messageId: msg.id,
+          });
+        }
+      }
+    }
   }, [thread, isGenerating, convertMessages, channel]);
 
   // Handle incoming messages from manager

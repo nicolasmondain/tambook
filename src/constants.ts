@@ -23,8 +23,8 @@ export const EVENTS = {
   /** Sent from Preview to Manager with thread state updates */
   THREAD_UPDATE: `${ADDON_ID}/thread-update`,
 
-  /** Sent from Preview to Manager when a component is generated */
-  COMPONENT_GENERATED: `${ADDON_ID}/component-generated`,
+  /** Sent from Preview to Manager when props are generated (to update Controls) */
+  PROPS_GENERATED: `${ADDON_ID}/props-generated`,
 
   /** Sent from Manager to Preview to clear the conversation */
   CLEAR_THREAD: `${ADDON_ID}/clear-thread`,

@@ -7,6 +7,7 @@ interface MessageListProps {
   messages: ChatMessage[];
   isGenerating: boolean;
   onCopyProps: (props: Record<string, unknown>) => void;
+  appliedPropsMessageIds: Set<string>;
 }
 
 const Container = styled.div({
@@ -78,6 +79,7 @@ export function MessageList({
   messages,
   isGenerating,
   onCopyProps,
+  appliedPropsMessageIds,
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +101,7 @@ export function MessageList({
               <ComponentPreview
                 component={message.generatedComponent}
                 onCopyProps={onCopyProps}
+                propsApplied={appliedPropsMessageIds.has(message.id)}
               />
             </GeneratedComponentContainer>
           )}
