@@ -4,7 +4,12 @@ Talk to your design system.
 
 Built during the [Tambo Hackathon](https://www.wemakedevs.org/hackathons/tambo), tambook connects your Storybook component library with [Tambo](https://tambo.co)'s generative UI. Describe what you want in plain English and see your components come to life—no more hunting through stories or manually tweaking props.
 
-![Tambook Demo](assets/tambook-demo.png)
+<table>
+  <tr>
+    <td><img src="assets/tambook-demo.png" alt="Tambook Button Demo" /></td>
+    <td><img src="assets/tambook-demo-card.png" alt="Tambook Card Demo" /></td>
+  </tr>
+</table>
 
 ## Features
 
