@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { addons } from 'storybook/internal/preview-api';
-import { TamboProvider, useTambo, type TamboComponent } from '@tambo-ai/react';
+import { TamboProvider, useTambo, useTamboContextAttachment, type TamboComponent } from '@tambo-ai/react';
 import { EVENTS } from '../constants';
 import { globalComponentRegistry } from '../services/componentExtractor';
 import { getConfig } from '../services/configStore';
@@ -68,85 +68,6 @@ function hasChildrenProp(propsSchema?: Record<string, unknown>): boolean {
   if (!propsSchema) return false;
   const properties = propsSchema.properties as Record<string, unknown> | undefined;
   return properties ? 'children' in properties : false;
-}
-
-/**
- * Build context helpers for Design System mode.
- * Explains component composition based on which components support children.
- */
-function buildDesignSystemContextHelpers(
-  allComponents: Array<{ name: string; description: string; propsSchema?: Record<string, unknown> }>
-): Record<string, () => string> {
-  return {
-    getDesignSystemContext: () => {
-      // Separate components into those that support nesting vs those that don't
-      const nestableComponents: string[] = [];
-      const leafComponents: string[] = [];
-
-      const componentSummaries = allComponents.map((comp) => {
-        const simplifiedSchema = simplifyPropsSchema(comp.propsSchema);
-        const supportsChildren = hasChildrenProp(comp.propsSchema);
-
-        if (supportsChildren) {
-          nestableComponents.push(comp.name);
-        } else {
-          leafComponents.push(comp.name);
-        }
-
-        const propsInfo = simplifiedSchema
-          ? `\n    Props: ${JSON.stringify(simplifiedSchema)}`
-          : '';
-        const nestingInfo = supportsChildren ? ' [supports children]' : '';
-        return `  - ${comp.name}${nestingInfo}: ${comp.description}${propsInfo}`;
-      }).join('\n');
-
-      // Build nesting instructions based on available components
-      const nestingSection = nestableComponents.length > 0
-        ? `
-COMPONENTS THAT SUPPORT NESTING (have "children" prop):
-${nestableComponents.map(n => `  - ${n}`).join('\n')}
-
-These components can contain other components via the "children" prop:
-- String content: "children": "Hello world"
-- Single child: "children": { "componentName": "...", "props": {...} }
-- Multiple children: "children": [{ "componentName": "...", "props": {...} }, ...]`
-        : '';
-
-      const leafSection = leafComponents.length > 0
-        ? `
-LEAF COMPONENTS (cannot contain other components):
-${leafComponents.map(n => `  - ${n}`).join('\n')}
-
-These components do NOT have a "children" prop. Use their specific props (like "label", "text", etc.).`
-        : '';
-
-      return `You are a Design System UI Builder. Create UI using the components below.
-
-AVAILABLE COMPONENTS:
-${componentSummaries}
-${nestingSection}
-${leafSection}
-
-IMPORTANT RULES:
-1. Return exactly ONE component (use a container component if combining multiple)
-2. Only components marked [supports children] can contain other components
-3. For leaf components, use their specific content props (label, text, title, etc.)
-4. Only include props that differ from defaults
-
-EXAMPLE - If Card supports children and Button doesn't:
-User asks: "A card with a button inside"
-{
-  "componentName": "Card",
-  "props": {
-    "title": "My Card",
-    "children": {
-      "componentName": "Button",
-      "props": { "label": "Click me" }
-    }
-  }
-}`;
-    },
-  };
 }
 
 /**
@@ -234,6 +155,338 @@ function renderComponentTree(
       {renderedChildren}
     </Component>
   );
+}
+
+/**
+ * Information about a component for building combinations
+ */
+interface ComponentInfo {
+  name: string;
+  description: string;
+  component: React.ComponentType<Record<string, unknown>>;
+  propsSchema?: Record<string, unknown>;
+  isNestable: boolean;
+}
+
+/**
+ * Node in a component tree structure for building nested combinations
+ */
+interface ComponentNode {
+  component: ComponentInfo;
+  children: ComponentNode[];
+  prefix: string; // Prefix for props (e.g., "outer_", "inner_", "leaf_")
+}
+
+/**
+ * Get a human-readable structure description
+ */
+function describeStructure(node: ComponentNode, depth: number = 0): string {
+  const indent = '  '.repeat(depth);
+  const childDescriptions = node.children.map(c => describeStructure(c, depth + 1)).join('');
+  if (node.children.length === 0) {
+    return `${indent}<${node.component.name} />\n`;
+  }
+  return `${indent}<${node.component.name}>\n${childDescriptions}${indent}</${node.component.name}>\n`;
+}
+
+/**
+ * Build a flat props schema from a component tree
+ */
+function buildFlatPropsSchema(node: ComponentNode): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+
+  // Add this node's props with prefix
+  const nodeProps = node.component.propsSchema?.properties as Record<string, unknown> | undefined;
+  if (nodeProps) {
+    for (const [key, value] of Object.entries(nodeProps)) {
+      if (key === 'children') continue;
+      const prefixedKey = node.prefix ? `${node.prefix}${key}` : key;
+      properties[prefixedKey] = value;
+    }
+  }
+
+  // Recursively add children's props
+  for (const child of node.children) {
+    const childProps = buildFlatPropsSchema(child);
+    Object.assign(properties, childProps);
+  }
+
+  return properties;
+}
+
+/**
+ * Build the actual React component from a component tree
+ */
+function buildCombinedComponent(tree: ComponentNode): React.FC<Record<string, unknown>> {
+  return function CombinedComponent(props: Record<string, unknown>) {
+    return renderNode(tree, props);
+  };
+}
+
+/**
+ * Recursively render a component node with its children
+ */
+function renderNode(node: ComponentNode, allProps: Record<string, unknown>): React.ReactElement {
+  const Component = node.component.component;
+
+  // Extract props for this node based on prefix
+  const nodeProps: Record<string, unknown> = {};
+  const nodePropsSchema = node.component.propsSchema?.properties as Record<string, unknown> | undefined;
+
+  if (nodePropsSchema) {
+    for (const key of Object.keys(nodePropsSchema)) {
+      if (key === 'children') continue;
+      const prefixedKey = node.prefix ? `${node.prefix}${key}` : key;
+      if (prefixedKey in allProps) {
+        nodeProps[key] = allProps[prefixedKey];
+      }
+    }
+  }
+
+  // Render children recursively
+  const renderedChildren = node.children.map((child, index) =>
+    React.cloneElement(renderNode(child, allProps), { key: index })
+  );
+
+  return (
+    <Component {...nodeProps}>
+      {renderedChildren.length > 0 ? renderedChildren : undefined}
+    </Component>
+  );
+}
+
+/**
+ * Generate explicit prop examples for description
+ */
+function generatePropExamples(node: ComponentNode): string[] {
+  const examples: string[] = [];
+  const nodeProps = node.component.propsSchema?.properties as Record<string, unknown> | undefined;
+
+  if (nodeProps) {
+    const propKeys = Object.keys(nodeProps).filter(k => k !== 'children').slice(0, 2);
+    for (const key of propKeys) {
+      const prefixedKey = node.prefix ? `${node.prefix}${key}` : key;
+      examples.push(prefixedKey);
+    }
+  }
+
+  for (const child of node.children) {
+    examples.push(...generatePropExamples(child));
+  }
+
+  return examples;
+}
+
+/**
+ * Generate all useful component combinations as flattened TamboComponents.
+ * Creates up to 3 levels of nesting with explicit naming and descriptions.
+ */
+function generateComponentCombinations(
+  components: ComponentInfo[]
+): TamboComponent[] {
+  const combinations: TamboComponent[] = [];
+
+  const nestableComponents = components.filter(c => c.isNestable);
+  const leafComponents = components.filter(c => !c.isNestable);
+
+  // LEVEL 1: Container > Leaf (e.g., Card_containing_Button)
+  for (const container of nestableComponents) {
+    for (const leaf of leafComponents) {
+      const tree: ComponentNode = {
+        component: container,
+        prefix: '',
+        children: [{
+          component: leaf,
+          prefix: `${leaf.name.toLowerCase()}_`,
+          children: [],
+        }],
+      };
+
+      const name = `${container.name}_containing_${leaf.name}`;
+      combinations.push(createCombinationFromTree(name, tree, 1));
+    }
+  }
+
+  // LEVEL 1: Container > Multiple Leaves (e.g., Card_containing_Text_and_Button)
+  for (const container of nestableComponents) {
+    for (let i = 0; i < leafComponents.length; i++) {
+      for (let j = i + 1; j < leafComponents.length; j++) {
+        const leaf1 = leafComponents[i];
+        const leaf2 = leafComponents[j];
+
+        const tree: ComponentNode = {
+          component: container,
+          prefix: '',
+          children: [
+            { component: leaf1, prefix: `${leaf1.name.toLowerCase()}_`, children: [] },
+            { component: leaf2, prefix: `${leaf2.name.toLowerCase()}_`, children: [] },
+          ],
+        };
+
+        const name = `${container.name}_containing_${leaf1.name}_and_${leaf2.name}`;
+        combinations.push(createCombinationFromTree(name, tree, 1));
+      }
+    }
+  }
+
+  // LEVEL 2: Container > Container > Leaf (e.g., Card_containing_Stack_containing_Button)
+  const primaryContainers = nestableComponents.filter(c =>
+    ['Card', 'Alert', 'Accordion'].includes(c.name)
+  );
+  const secondaryContainers = nestableComponents.filter(c =>
+    ['Stack', 'Box', 'List'].includes(c.name)
+  );
+
+  for (const outer of primaryContainers) {
+    for (const inner of secondaryContainers) {
+      for (const leaf of leafComponents) {
+        const tree: ComponentNode = {
+          component: outer,
+          prefix: '',
+          children: [{
+            component: inner,
+            prefix: `${inner.name.toLowerCase()}_`,
+            children: [{
+              component: leaf,
+              prefix: `${leaf.name.toLowerCase()}_`,
+              children: [],
+            }],
+          }],
+        };
+
+        const name = `${outer.name}_containing_${inner.name}_containing_${leaf.name}`;
+        combinations.push(createCombinationFromTree(name, tree, 2));
+      }
+    }
+  }
+
+  // LEVEL 2: Container > Container > Multiple Leaves
+  for (const outer of primaryContainers) {
+    for (const inner of secondaryContainers) {
+      for (let i = 0; i < leafComponents.length; i++) {
+        for (let j = i + 1; j < leafComponents.length; j++) {
+          const leaf1 = leafComponents[i];
+          const leaf2 = leafComponents[j];
+
+          const tree: ComponentNode = {
+            component: outer,
+            prefix: '',
+            children: [{
+              component: inner,
+              prefix: `${inner.name.toLowerCase()}_`,
+              children: [
+                { component: leaf1, prefix: `${leaf1.name.toLowerCase()}_`, children: [] },
+                { component: leaf2, prefix: `${leaf2.name.toLowerCase()}_`, children: [] },
+              ],
+            }],
+          };
+
+          const name = `${outer.name}_containing_${inner.name}_containing_${leaf1.name}_and_${leaf2.name}`;
+          combinations.push(createCombinationFromTree(name, tree, 2));
+        }
+      }
+    }
+  }
+
+  // LEVEL 3: Container > Container > Container > Leaf
+  for (const outer of primaryContainers.slice(0, 2)) { // Limit to avoid explosion
+    for (const middle of secondaryContainers.slice(0, 2)) {
+      for (const inner of secondaryContainers.filter(c => c.name !== middle.name).slice(0, 2)) {
+        for (const leaf of leafComponents.slice(0, 3)) { // Most common leaves
+          const tree: ComponentNode = {
+            component: outer,
+            prefix: '',
+            children: [{
+              component: middle,
+              prefix: `${middle.name.toLowerCase()}_`,
+              children: [{
+                component: inner,
+                prefix: `inner${inner.name.toLowerCase()}_`,
+                children: [{
+                  component: leaf,
+                  prefix: `${leaf.name.toLowerCase()}_`,
+                  children: [],
+                }],
+              }],
+            }],
+          };
+
+          const name = `${outer.name}_containing_${middle.name}_containing_${inner.name}_containing_${leaf.name}`;
+          combinations.push(createCombinationFromTree(name, tree, 3));
+        }
+      }
+    }
+  }
+
+  // LEVEL 3: Container > Container > Container > Multiple Leaves
+  for (const outer of primaryContainers.slice(0, 2)) {
+    for (const middle of secondaryContainers.slice(0, 2)) {
+      for (const inner of secondaryContainers.filter(c => c.name !== middle.name).slice(0, 1)) {
+        for (let i = 0; i < Math.min(leafComponents.length, 3); i++) {
+          for (let j = i + 1; j < Math.min(leafComponents.length, 3); j++) {
+            const leaf1 = leafComponents[i];
+            const leaf2 = leafComponents[j];
+
+            const tree: ComponentNode = {
+              component: outer,
+              prefix: '',
+              children: [{
+                component: middle,
+                prefix: `${middle.name.toLowerCase()}_`,
+                children: [{
+                  component: inner,
+                  prefix: `inner${inner.name.toLowerCase()}_`,
+                  children: [
+                    { component: leaf1, prefix: `${leaf1.name.toLowerCase()}_`, children: [] },
+                    { component: leaf2, prefix: `${leaf2.name.toLowerCase()}_`, children: [] },
+                  ],
+                }],
+              }],
+            };
+
+            const name = `${outer.name}_containing_${middle.name}_containing_${inner.name}_containing_${leaf1.name}_and_${leaf2.name}`;
+            combinations.push(createCombinationFromTree(name, tree, 3));
+          }
+        }
+      }
+    }
+  }
+
+  console.log(`[Tambook] Generated ${combinations.length} component combinations (1-3 levels deep)`);
+  return combinations;
+}
+
+/**
+ * Create a TamboComponent from a component tree
+ */
+function createCombinationFromTree(
+  name: string,
+  tree: ComponentNode,
+  nestingLevel: number
+): TamboComponent {
+  const properties = buildFlatPropsSchema(tree);
+  const propExamples = generatePropExamples(tree).slice(0, 4);
+  const structurePreview = describeStructure(tree).trim();
+
+  // Build explicit description
+  const description = `[${nestingLevel}-level nesting] ${name.replace(/_/g, ' ')}
+
+STRUCTURE:
+${structurePreview}
+
+PROPS: Use flat props with prefixes. Examples: ${propExamples.join(', ')}
+- Root component props: no prefix
+- Nested components: use their name as prefix (e.g., stack_direction, button_label)`;
+
+  return {
+    name,
+    description,
+    component: buildCombinedComponent(tree),
+    propsSchema: {
+      type: 'object',
+      properties,
+    } as Record<string, unknown>,
+  };
 }
 
 // Inline styles
@@ -472,10 +725,32 @@ const styles = {
     borderRadius: '6px',
     border: '1px solid #e6e6e6',
   },
+  componentCardHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
+  },
   componentName: {
     fontSize: '13px',
     fontWeight: 600,
     color: '#333',
+  },
+  nestableBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    padding: '2px 6px',
+    fontSize: '10px',
+    fontWeight: 500,
+    color: '#7c3aed',
+    backgroundColor: '#ede9fe',
+    borderRadius: '4px',
+    cursor: 'help',
+    position: 'relative' as const,
+  },
+  nestableIcon: {
+    fontSize: '11px',
   },
   typingIndicator: {
     display: 'flex',
@@ -509,6 +784,58 @@ const styles = {
     fontSize: '12px',
   },
 };
+
+/**
+ * Badge component showing that a component can contain other components
+ */
+function NestableBadge() {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 });
+  const badgeRef = useRef<HTMLSpanElement>(null);
+
+  const handleMouseEnter = () => {
+    if (badgeRef.current) {
+      const rect = badgeRef.current.getBoundingClientRect();
+      setTooltipPosition({
+        top: rect.top - 8, // Position above the badge
+        left: rect.left + rect.width / 2, // Center horizontally
+      });
+    }
+    setShowTooltip(true);
+  };
+
+  return (
+    <span
+      ref={badgeRef}
+      style={styles.nestableBadge}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <span style={styles.nestableIcon}>&#123;&#125;</span>
+      nestable
+      {showTooltip && (
+        <div
+          style={{
+            position: 'fixed',
+            top: tooltipPosition.top,
+            left: tooltipPosition.left,
+            transform: 'translate(-50%, -100%)',
+            padding: '6px 10px',
+            fontSize: '11px',
+            color: '#fff',
+            backgroundColor: '#333',
+            borderRadius: '4px',
+            whiteSpace: 'nowrap',
+            zIndex: 10000,
+            pointerEvents: 'none',
+          }}
+        >
+          Can contain other components as children
+        </div>
+      )}
+    </span>
+  );
+}
 
 /**
  * Error boundary for component rendering
@@ -580,32 +907,106 @@ function GeneratedComponentPreview({
 }
 
 /**
+ * Build a context string that helps the AI understand how to select components
+ */
+function buildComponentSelectionGuide(componentTools: TamboComponent[]): string {
+  // Separate base components from combinations
+  const baseComponents = componentTools.filter(c => !c.name.includes('_containing_'));
+  const combinations = componentTools.filter(c => c.name.includes('_containing_'));
+
+  // Group combinations by nesting level
+  const level1 = combinations.filter(c => (c.name.match(/_containing_/g) || []).length === 1);
+  const level2 = combinations.filter(c => (c.name.match(/_containing_/g) || []).length === 2);
+  const level3 = combinations.filter(c => (c.name.match(/_containing_/g) || []).length >= 3);
+
+  return `# DESIGN SYSTEM COMPONENT SELECTION GUIDE
+
+You are a UI builder assistant. Your job is to select the RIGHT component tool to generate UI based on user requests.
+
+## IMPORTANT RULES:
+1. ALWAYS choose a PRE-BUILT combination that matches the user's request structure
+2. The component name describes the EXACT nesting structure (e.g., "Card_containing_Stack_containing_Button")
+3. Use FLAT props with prefixes - NO nested objects
+4. Match the user's request to the closest component structure available
+
+## AVAILABLE BASE COMPONENTS (single, no nesting):
+${baseComponents.map(c => `- ${c.name}`).join('\n')}
+
+## AVAILABLE COMBINATIONS BY NESTING DEPTH:
+
+### 1-LEVEL NESTING (Container > Child):
+${level1.slice(0, 20).map(c => `- ${c.name}`).join('\n')}
+${level1.length > 20 ? `... and ${level1.length - 20} more` : ''}
+
+### 2-LEVEL NESTING (Container > Container > Child):
+${level2.slice(0, 15).map(c => `- ${c.name}`).join('\n')}
+${level2.length > 15 ? `... and ${level2.length - 15} more` : ''}
+
+### 3-LEVEL NESTING (Container > Container > Container > Child):
+${level3.slice(0, 10).map(c => `- ${c.name}`).join('\n')}
+${level3.length > 10 ? `... and ${level3.length - 10} more` : ''}
+
+## HOW TO SELECT THE RIGHT COMPONENT:
+
+1. **Analyze the user's request** - identify the structure they want
+2. **Map to component names** - find the combination that matches
+3. **Use flat props with prefixes**:
+   - Root component props: no prefix (e.g., \`title\`, \`padding\`)
+   - Nested components: use their name as prefix (e.g., \`stack_direction\`, \`button_label\`, \`text_content\`)
+   - For 3-level nesting, middle container uses prefix, innermost uses \`inner\` prefix
+
+## EXAMPLES:
+
+User: "Create a card with a button"
+→ Use: Card_containing_Button
+→ Props: { title: "My Card", button_label: "Click me", button_variant: "primary" }
+
+User: "Make an alert with a title and action button"
+→ Use: Alert_containing_Text_and_Button
+→ Props: { type: "info", text_content: "Alert message", button_label: "OK" }
+
+User: "Card with a stack of items inside"
+→ Use: Card_containing_Stack_containing_Text (or with Button)
+→ Props: { title: "Card", stack_direction: "vertical", text_content: "Item" }
+
+User: "Complex layout with card > stack > multiple items"
+→ Use: Card_containing_Stack_containing_Text_and_Button
+→ Props: { title: "Card", stack_gap: "medium", text_content: "Hello", button_label: "Action" }
+
+REMEMBER: Always use the most specific combination available. If the exact structure isn't available, use the closest match.`;
+}
+
+/**
  * Inner chat component that uses Tambo context
  */
 function DesignSystemChatInner({
   componentTools,
   registeredComponents,
   preparationProgress,
+  componentRegistry,
 }: {
   componentTools: TamboComponent[];
   registeredComponents: string[];
   preparationProgress: PreparationProgress | null;
+  componentRegistry: Map<string, React.ComponentType<Record<string, unknown>>>;
 }) {
   const { thread, sendThreadMessage, startNewThread } = useTambo();
+  const { addContextAttachment } = useTamboContextAttachment();
   const [isGenerating, setIsGenerating] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Build component registry map for rendering
-  const componentRegistry = useMemo(() => {
-    const registry = new Map<string, React.ComponentType<Record<string, unknown>>>();
-    for (const tool of componentTools) {
-      if (tool.component) {
-        registry.set(tool.name, tool.component as React.ComponentType<Record<string, unknown>>);
-      }
-    }
-    return registry;
+  // Build the context guide once when tools are ready
+  const contextGuide = useMemo(() => {
+    if (componentTools.length === 0) return '';
+    return buildComponentSelectionGuide(componentTools);
   }, [componentTools]);
+
+  // Clear thread handler
+  const handleClearThreadWithContext = useCallback(() => {
+    setIsGenerating(false);
+    startNewThread();
+  }, [startNewThread]);
 
   // Convert Tambo thread messages to ChatMessage format
   const messages: ChatMessage[] = useMemo(() => {
@@ -631,12 +1032,17 @@ function DesignSystemChatInner({
         timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
       };
 
-      const tamboComponent = (msg as unknown as Record<string, unknown>).component as {
+      // Try to get component from message
+      const msgRecord = msg as unknown as Record<string, unknown>;
+      const tamboComponent = msgRecord.component as {
         componentName?: string;
         props?: Record<string, unknown>;
       } | undefined;
 
       if (tamboComponent?.componentName) {
+        console.log('[Tambook] Found component:', tamboComponent.componentName, 'with props:', tamboComponent.props);
+
+        // Direct component - Tambo calls the specific combination or base component
         chatMessage.generatedComponent = {
           componentName: tamboComponent.componentName,
           props: tamboComponent.props || {},
@@ -660,18 +1066,22 @@ function DesignSystemChatInner({
     setIsGenerating(true);
 
     try {
+      // Add context guide before each message (context attachments are one-time use)
+      if (contextGuide) {
+        addContextAttachment({
+          displayName: 'Component Selection Guide',
+          context: contextGuide,
+          type: 'system-guide',
+        });
+      }
       await sendThreadMessage(content);
     } catch (error) {
       console.error('[Tambook] Failed to send message:', error);
     } finally {
       setIsGenerating(false);
     }
-  }, [inputValue, isGenerating, sendThreadMessage]);
+  }, [inputValue, isGenerating, sendThreadMessage, contextGuide, addContextAttachment]);
 
-  const handleClearThread = useCallback(() => {
-    setIsGenerating(false);
-    startNewThread();
-  }, [startNewThread]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -693,7 +1103,7 @@ function DesignSystemChatInner({
           </span>
         </div>
         {hasMessages && (
-          <button style={styles.clearButton} onClick={handleClearThread}>
+          <button style={styles.clearButton} onClick={handleClearThreadWithContext}>
             Clear Chat
           </button>
         )}
@@ -749,9 +1159,8 @@ function DesignSystemChatInner({
               <div style={styles.emptyState}>
                 <h3 style={styles.emptyStateTitle}>Design System UI Builder</h3>
                 <p style={styles.emptyStateText}>
-                  Build complete UIs by combining components. Describe what you want
-                  and I'll compose the right components together - including nested
-                  structures like buttons inside cards, badges in headers, and more.
+                  Build UIs with up to 3 levels of nesting. Try requests like
+                  "a card with a button" or "an alert containing a stack with text and a badge".
                 </p>
               </div>
             )}
@@ -787,11 +1196,23 @@ function DesignSystemChatInner({
 
         <div style={styles.sidebar}>
           <h4 style={styles.sidebarTitle}>Available Components</h4>
-          {registeredComponents.map((name) => (
-            <div key={name} style={styles.componentCard}>
-              <div style={styles.componentName}>{name}</div>
-            </div>
-          ))}
+          {registeredComponents.map((name) => {
+            const tool = componentTools.find((t) => t.name === name);
+            const isNestable = tool?.propsSchema
+              ? hasChildrenProp(tool.propsSchema as Record<string, unknown>)
+              : false;
+
+            return (
+              <div key={name} style={styles.componentCard}>
+                <div style={styles.componentCardHeader}>
+                  <div style={styles.componentName}>{name}</div>
+                  {isNestable && (
+                    <NestableBadge />
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -850,6 +1271,57 @@ export function DesignSystemChat() {
 
   const { apiKey, apiUrl } = apiConfig;
 
+  // Build component registry map for rendering (must be before conditional returns)
+  const componentRegistry = useMemo(() => {
+    const registry = new Map<string, React.ComponentType<Record<string, unknown>>>();
+    for (const tool of componentTools) {
+      if (tool.component) {
+        registry.set(tool.name, tool.component as React.ComponentType<Record<string, unknown>>);
+      }
+    }
+    return registry;
+  }, [componentTools]);
+
+  // Build component info for generating combinations
+  const componentInfoList: ComponentInfo[] = useMemo(() => {
+    return componentTools
+      .filter(c => c.component)
+      .map(c => ({
+        name: c.name,
+        description: c.description,
+        component: c.component as React.ComponentType<Record<string, unknown>>,
+        propsSchema: c.propsSchema as Record<string, unknown> | undefined,
+        isNestable: hasChildrenProp(c.propsSchema as Record<string, unknown> | undefined),
+      }));
+  }, [componentTools]);
+
+  // Generate all component combinations for Tambo
+  const allTamboComponents: TamboComponent[] = useMemo(() => {
+    if (componentInfoList.length === 0) return [];
+
+    // Start with base components (original ones)
+    const baseComponents: TamboComponent[] = componentTools.map(c => ({
+      name: c.name,
+      description: c.description,
+      component: c.component,
+      propsSchema: c.propsSchema,
+    }));
+
+    // Generate combinations
+    const combinations = generateComponentCombinations(componentInfoList);
+
+    // Add combination components to the registry for rendering
+    for (const combo of combinations) {
+      if (combo.component) {
+        componentRegistry.set(combo.name, combo.component as React.ComponentType<Record<string, unknown>>);
+      }
+    }
+
+    console.log(`[Tambook] Registered ${baseComponents.length} base components and ${combinations.length} combinations`);
+
+    return [...baseComponents, ...combinations];
+  }, [componentInfoList, componentTools, componentRegistry]);
+
   // Show message if no API key
   if (!apiKey) {
     return (
@@ -870,25 +1342,17 @@ export function DesignSystemChat() {
     );
   }
 
-  // Build context helpers for design system mode
-  const allComponentsInfo = componentTools.map((c) => ({
-    name: c.name,
-    description: c.description,
-    propsSchema: c.propsSchema as Record<string, unknown> | undefined,
-  }));
-  const contextHelpers = buildDesignSystemContextHelpers(allComponentsInfo);
-
   return (
     <TamboProvider
       tamboUrl={apiUrl}
       apiKey={apiKey}
-      components={componentTools}
-      contextHelpers={contextHelpers}
+      components={allTamboComponents}
     >
       <DesignSystemChatInner
-        componentTools={componentTools}
+        componentTools={allTamboComponents}
         registeredComponents={registeredComponents}
         preparationProgress={preparationProgress}
+        componentRegistry={componentRegistry}
       />
     </TamboProvider>
   );
