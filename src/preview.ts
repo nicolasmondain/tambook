@@ -1,13 +1,15 @@
 import type { Renderer, ProjectAnnotations } from 'storybook/internal/types';
+import React from 'react';
 import { addons } from 'storybook/internal/preview-api';
 import { withTamboContext } from './decorators/withTamboContext';
-import { EVENTS } from './constants';
+import { EVENTS, PARAM_KEY } from './constants';
 import {
   globalComponentRegistry,
   extractComponentFromContext,
   type StoryContext as ExtractorContext,
 } from './services/componentExtractor';
 import { fetchStoryIndex, getOneStoryPerComponent } from './services/storyIndexService';
+import { setConfig, getConfig } from './services/configStore';
 
 // Flag to track if preparation has been initiated
 let preparationInitiated = false;
@@ -72,6 +74,21 @@ function initializeComponentPreparation() {
         const storyId = storyIds[i];
         try {
           const story = await storyStore.loadStory({ storyId }) as PreparedStory;
+
+          // Extract API config from story parameters (only once)
+          if (!getConfig().apiKey && story?.parameters) {
+            const tambookParams = story.parameters[PARAM_KEY] as {
+              apiKey?: string;
+              apiUrl?: string;
+            } | undefined;
+            if (tambookParams?.apiKey) {
+              setConfig({
+                apiKey: tambookParams.apiKey,
+                apiUrl: tambookParams.apiUrl,
+              });
+              console.log('[Tambook] API config initialized from story parameters');
+            }
+          }
 
           if (story?.argTypes && story?.component) {
             const extractorContext: ExtractorContext = {

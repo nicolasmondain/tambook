@@ -15,6 +15,7 @@ import {
   globalComponentRegistry,
   type StoryContext as ExtractorContext,
 } from '../services/componentExtractor';
+import { setConfig } from '../services/configStore';
 
 
 /**
@@ -241,154 +242,6 @@ When the user asks to modify props, only include the props they mentioned. Unmen
   };
 }
 
-/**
- * Component info for design system context
- */
-interface ComponentInfo {
-  name: string;
-  description: string;
-  propsSchema?: Record<string, unknown>;
-}
-
-/**
- * Build context helpers for Design System mode.
- * Provides full access to all components with composition support.
- */
-function buildDesignSystemContextHelpers(
-  allComponents: ComponentInfo[]
-): Record<string, () => string> {
-  return {
-    getDesignSystemContext: () => {
-      const componentSummaries = allComponents.map((comp) => {
-        const simplifiedSchema = simplifyPropsSchema(comp.propsSchema);
-        const propsInfo = simplifiedSchema
-          ? `\n    Props: ${JSON.stringify(simplifiedSchema)}`
-          : '';
-        return `  - ${comp.name}: ${comp.description}${propsInfo}`;
-      }).join('\n');
-
-      return `You are a design system assistant with access to ALL of the following components:
-
-${componentSummaries}
-
-IMPORTANT GUIDELINES:
-1. You can use ANY of these components to fulfill the user's request
-2. Components can be NESTED inside each other (e.g., Button inside Card) up to 5 levels deep
-3. Use the "children" prop to compose components together
-4. When nesting components, render child components as React elements
-5. Only include props that are explicitly needed - omit props to use defaults
-6. Be creative in combining components to create rich, functional UIs
-
-Example compositions:
-- A Card with a Button: Use Card with children containing a Button
-- A form: Combine multiple Input components with a submit Button
-- A notification: Badge inside a Card with descriptive text
-
-Think about which components to combine and how to nest them to best fulfill the user's request.`;
-    },
-  };
-}
-
-/**
- * Bridge component for Design System mode
- * Handles separate thread and context for full design system access
- */
-function DesignSystemBridge({
-  allComponents,
-}: {
-  allComponents: TamboComponent[];
-}) {
-  const channel = addons.getChannel();
-  const { thread, sendThreadMessage, startNewThread } = useTambo();
-  const [isGenerating, setIsGenerating] = useState(false);
-  const emittedPropsRef = useRef<Set<string>>(new Set());
-
-  // Convert messages for the design system thread
-  const convertMessages = useCallback((): ChatMessage[] => {
-    if (!thread?.messages) return [];
-
-    return thread.messages.map((msg) => {
-      let textContent = '';
-      if (typeof msg.content === 'string') {
-        textContent = msg.content;
-      } else if (Array.isArray(msg.content)) {
-        textContent = msg.content
-          .filter((part): part is { type: 'text'; text: string } =>
-            typeof part === 'object' && part !== null && 'type' in part && part.type === 'text'
-          )
-          .map((part) => part.text)
-          .join('');
-      }
-
-      const chatMessage: ChatMessage = {
-        id: msg.id,
-        role: msg.role as 'user' | 'assistant',
-        content: textContent,
-        timestamp: msg.createdAt ? new Date(msg.createdAt).getTime() : Date.now(),
-      };
-
-      const tamboComponent = (msg as Record<string, unknown>).component as {
-        componentName?: string;
-        props?: Record<string, unknown>;
-      } | undefined;
-
-      if (tamboComponent?.componentName) {
-        const tamboProps = tamboComponent.props || {};
-        if (Object.keys(tamboProps).length > 0) {
-          chatMessage.generatedComponent = {
-            componentName: tamboComponent.componentName,
-            props: { ...tamboProps },
-          };
-        }
-      }
-
-      return chatMessage;
-    });
-  }, [thread]);
-
-  // Sync design system thread state to manager
-  useEffect(() => {
-    const messages = convertMessages();
-    const state: ThreadState = {
-      messages,
-      isGenerating,
-      error: undefined,
-    };
-    channel.emit(EVENTS.DS_THREAD_UPDATE, { state });
-  }, [thread, isGenerating, convertMessages, channel]);
-
-  // Handle design system messages
-  useEffect(() => {
-    const handleSendMessage = async (payload: SendMessagePayload) => {
-      try {
-        setIsGenerating(true);
-        await sendThreadMessage(payload.content);
-      } catch (error) {
-        channel.emit(EVENTS.ERROR, {
-          message: error instanceof Error ? error.message : 'Failed to send message',
-        });
-      } finally {
-        setIsGenerating(false);
-      }
-    };
-
-    const handleClearThread = () => {
-      setIsGenerating(false);
-      startNewThread();
-      emittedPropsRef.current.clear();
-    };
-
-    channel.on(EVENTS.SEND_DS_MESSAGE, handleSendMessage);
-    channel.on(EVENTS.CLEAR_DS_THREAD, handleClearThread);
-
-    return () => {
-      channel.off(EVENTS.SEND_DS_MESSAGE, handleSendMessage);
-      channel.off(EVENTS.CLEAR_DS_THREAD, handleClearThread);
-    };
-  }, [channel, sendThreadMessage, startNewThread]);
-
-  return null;
-}
 
 /**
  * Decorator that wraps stories with TamboProvider context
@@ -450,6 +303,11 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
   // API key handling
   const apiKey = parameters.apiKey;
 
+  // Store config globally so DesignSystemChat can access it
+  if (apiKey) {
+    setConfig({ apiKey, apiUrl: tamboUrl });
+  }
+
   // Warn if no API key is provided for Tambo Cloud
   if (!apiKey && !tamboUrl) {
     console.warn(
@@ -457,6 +315,7 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
       'parameters: { tambook: { apiKey: import.meta.env.STORYBOOK_TAMBO_API_KEY } }'
     );
   }
+
 
   // Don't render TamboProvider without an API key (would fail anyway)
   if (!apiKey) {
@@ -481,41 +340,20 @@ export const withTamboContext: DecoratorFunction<Renderer> = (StoryFn, context) 
     currentPropsSchema as Record<string, unknown> | undefined
   );
 
-  // Build context helpers for design system mode (all components)
-  const allComponentsInfo: ComponentInfo[] = componentTools.map((c) => ({
-    name: c.name,
-    description: c.description,
-    propsSchema: c.propsSchema as Record<string, unknown> | undefined,
-  }));
-  const designSystemContextHelpers = buildDesignSystemContextHelpers(allComponentsInfo);
-
   return (
-    <>
-      {/* Primary provider for single-component story mode (ONLY current component) */}
-      <TamboProvider
-        tamboUrl={tamboUrl}
-        apiKey={apiKey}
-        components={singleComponentTools}
-        contextHelpers={contextHelpers}
+    <TamboProvider
+      tamboUrl={tamboUrl}
+      apiKey={apiKey}
+      components={singleComponentTools}
+      contextHelpers={contextHelpers}
+    >
+      <TamboContextBridge
+        parameters={augmentedParameters}
+        currentComponentName={currentComponentName}
       >
-        <TamboContextBridge
-          parameters={augmentedParameters}
-          currentComponentName={currentComponentName}
-        >
-          <StoryFn />
-        </TamboContextBridge>
-      </TamboProvider>
-
-      {/* Secondary provider for design system mode (ALL components) */}
-      <TamboProvider
-        tamboUrl={tamboUrl}
-        apiKey={apiKey}
-        components={componentTools}
-        contextHelpers={designSystemContextHelpers}
-      >
-        <DesignSystemBridge allComponents={componentTools} />
-      </TamboProvider>
-    </>
+        <StoryFn />
+      </TamboContextBridge>
+    </TamboProvider>
   );
 };
 
