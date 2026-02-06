@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Card } from './Card';
+import { Button } from './Button';
+import { Badge } from './Badge';
+import { Stack } from './Stack';
 
 const meta: Meta<typeof Card> = {
   title: 'Components/Card',
@@ -7,22 +10,22 @@ const meta: Meta<typeof Card> = {
   parameters: {
     docs: {
       description: {
-        component: 'A flexible card component for displaying content with optional image and footer.',
+        component: 'A versatile card component for displaying content in a contained format. Supports nested components via children.',
       },
     },
   },
   argTypes: {
     title: {
       control: 'text',
-      description: 'The card title',
+      description: 'Card header title',
     },
     description: {
       control: 'text',
-      description: 'Card body text or description',
+      description: 'Card body text',
     },
     imageUrl: {
       control: 'text',
-      description: 'URL for the card header image',
+      description: 'URL for header image',
     },
     variant: {
       control: 'select',
@@ -31,7 +34,11 @@ const meta: Meta<typeof Card> = {
     },
     footer: {
       control: 'text',
-      description: 'Footer text content',
+      description: 'Footer text',
+    },
+    children: {
+      control: false,
+      description: 'Nested components (buttons, badges, etc.)',
     },
   },
   tags: ['autodocs'],
@@ -43,48 +50,67 @@ type Story = StoryObj<typeof Card>;
 export const Default: Story = {
   args: {
     title: 'Card Title',
-    description: 'This is a description of the card content. It can span multiple lines and provides context.',
+    description: 'This is the card description with some helpful text.',
+    variant: 'default',
   },
 };
 
 export const WithImage: Story = {
   args: {
     title: 'Mountain View',
-    description: 'A beautiful mountain landscape captured at sunrise.',
+    description: 'A beautiful mountain landscape.',
     imageUrl: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=200&fit=crop',
+    variant: 'elevated',
   },
+};
+
+export const WithChildren: Story = {
+  args: {
+    title: 'Interactive Card',
+    description: 'This card contains nested components.',
+    variant: 'default',
+  },
+  render: (args) => (
+    <Card {...args}>
+      <Stack direction="horizontal" gap="small">
+        <Button label="Accept" variant="primary" size="small" />
+        <Button label="Decline" variant="outline" size="small" />
+      </Stack>
+    </Card>
+  ),
+};
+
+export const WithBadgeAndButton: Story = {
+  args: {
+    title: 'Product Card',
+    variant: 'elevated',
+  },
+  render: (args) => (
+    <Card {...args}>
+      <Stack direction="vertical" gap="medium">
+        <Stack direction="horizontal" gap="small">
+          <Badge text="New" color="green" />
+          <Badge text="Sale" color="red" />
+        </Stack>
+        <Button label="Add to Cart" variant="primary" />
+      </Stack>
+    </Card>
+  ),
 };
 
 export const Outlined: Story = {
   args: {
     title: 'Outlined Card',
-    description: 'This card has an outlined style with a colored border.',
+    description: 'A card with an outlined style.',
     variant: 'outlined',
-  },
-};
-
-export const Elevated: Story = {
-  args: {
-    title: 'Elevated Card',
-    description: 'This card has an elevated appearance with a shadow.',
-    variant: 'elevated',
   },
 };
 
 export const WithFooter: Story = {
   args: {
-    title: 'Article Title',
-    description: 'An interesting article about something noteworthy.',
-    footer: 'Published on January 15, 2024',
-  },
-};
-
-export const Complete: Story = {
-  args: {
-    title: 'Featured Post',
-    description: 'This is a complete card example with all props filled in.',
-    imageUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=400&h=200&fit=crop',
-    variant: 'elevated',
-    footer: 'By John Doe - 5 min read',
+    title: 'Card with Footer',
+    description: 'This card has a footer section.',
+    footer: 'Last updated: 2 hours ago',
+    variant: 'default',
   },
 };

@@ -2,9 +2,11 @@ import React from 'react';
 
 export interface CardProps {
   /** Card title */
-  title: string;
+  title?: string;
   /** Card description or body text */
   description?: string;
+  /** Nested content - can contain buttons, badges, forms, etc. */
+  children?: React.ReactNode;
   /** Image URL to display at the top */
   imageUrl?: string;
   /** Visual variant */
@@ -34,6 +36,7 @@ const variantStyles: Record<string, React.CSSProperties> = {
 export const Card: React.FC<CardProps> = ({
   title,
   description,
+  children,
   imageUrl,
   variant = 'default',
   footer,
@@ -69,6 +72,10 @@ export const Card: React.FC<CardProps> = ({
     lineHeight: 1.5,
   };
 
+  const childrenStyle: React.CSSProperties = {
+    marginTop: description || title ? '16px' : '0',
+  };
+
   const footerStyle: React.CSSProperties = {
     padding: '12px 16px',
     borderTop: '1px solid #e5e7eb',
@@ -78,10 +85,11 @@ export const Card: React.FC<CardProps> = ({
 
   return (
     <div style={containerStyle}>
-      {imageUrl && <img src={imageUrl} alt={title} style={imageStyle} />}
+      {imageUrl && <img src={imageUrl} alt={title || 'Card image'} style={imageStyle} />}
       <div style={contentStyle}>
-        <h3 style={titleStyle}>{title}</h3>
+        {title && <h3 style={titleStyle}>{title}</h3>}
         {description && <p style={descriptionStyle}>{description}</p>}
+        {children && <div style={childrenStyle}>{children}</div>}
       </div>
       {footer && <div style={footerStyle}>{footer}</div>}
     </div>
