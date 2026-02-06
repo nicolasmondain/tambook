@@ -1,8 +1,16 @@
 # tambook
 
-Talk to your design system.
+**Talk to your design system.**
 
-A Storybook addon powered by [Tambo](https://tambo.co). Describe what you want in natural language and see your components come to life.
+A Storybook addon, powered by [Tambo](https://tambo.co), that automatically detects all your React components.
+
+Just tell your design system what you need:
+
+- *Show me a primary button with a loading state.*
+- *Create a card with an image, title, and two actions.*
+- *Display a modal with a destructive confirmation.*
+
+Tambook understands your components, reads your Storybook setup, and renders the right combination instantly.
 
 <table>
   <tr>
@@ -36,13 +44,6 @@ npm run example:storybook
 ```
 
 Open http://localhost:6006 and find the **Tambook** panel.
-
-## Example Prompts
-
-- "Build a pricing card for a Pro plan at $29/month with 5 features"
-- "Create a user profile card for a software engineer from San Francisco"
-- "Make a contact form with name, email, and message fields"
-- "Design an error alert for when a payment fails"
 
 ## License
 
